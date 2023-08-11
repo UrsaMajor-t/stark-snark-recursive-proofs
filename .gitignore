@@ -18,3 +18,5 @@ target/
 
 # VS Code settings
 **/.vscode
+
+venv/
