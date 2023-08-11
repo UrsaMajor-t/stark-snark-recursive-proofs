@@ -12,7 +12,7 @@ use math::StarkField;
 #[derive(Clone, PartialEq, Eq)]
 pub struct FriOptions {
     folding_factor: usize,
-    max_remainder_size: usize,
+    remainder_max_degree: usize,
     blowup_factor: usize,
 }
 
@@ -21,30 +21,24 @@ impl FriOptions {
     ///
     /// # Panics
     /// Panics if:
-    /// * `blowup_factor` is not a power of two.
-    /// * `folding_factor` is not 4, 8, or 16.
-    /// * `max_remainder_size` is not at least twice the size of the `blowup_factor`.
-    pub fn new(blowup_factor: usize, folding_factor: usize, max_remainder_size: usize) -> Self {
+    /// - `blowup_factor` is not a power of two.
+    /// - `folding_factor` is not 2, 4, 8, or 16.
+    pub fn new(blowup_factor: usize, folding_factor: usize, remainder_max_degree: usize) -> Self {
         // TODO: change panics to errors
         assert!(
             blowup_factor.is_power_of_two(),
-            "blowup factor must be a power of two, but was {}",
-            blowup_factor
+            "blowup factor must be a power of two, but was {blowup_factor}"
         );
         assert!(
-            folding_factor == 4 || folding_factor == 8 || folding_factor == 16,
-            "folding factor {} is not supported",
-            folding_factor
-        );
-        assert!(
-            max_remainder_size >= folding_factor * 2,
-            "expected max remainder size to be at least {}, but was {}",
-            folding_factor * 2,
-            max_remainder_size
+            folding_factor == 2
+                || folding_factor == 4
+                || folding_factor == 8
+                || folding_factor == 16,
+            "folding factor {folding_factor} is not supported"
         );
         FriOptions {
             folding_factor,
-            max_remainder_size,
+            remainder_max_degree,
             blowup_factor,
         }
     }
@@ -61,18 +55,18 @@ impl FriOptions {
 
     /// Returns the factor by which the degree of a polynomial is reduced with each FRI layer.
     ///
-    /// In combination with `max_remainder_size` this property defines how many FRI layers are
+    /// In combination with `remainder_max_degree_plus_1` this property defines how many FRI layers are
     /// needed for an evaluation domain of a given size.
     pub fn folding_factor(&self) -> usize {
         self.folding_factor
     }
 
-    /// Returns maximum allowed remainder (last FRI layer) size.
+    /// Returns maximum allowed remainder polynomial degree.
     ///
     /// In combination with `folding_factor` this property defines how many FRI layers are needed
     /// for an evaluation domain of a given size.
-    pub fn max_remainder_size(&self) -> usize {
-        self.max_remainder_size
+    pub fn remainder_max_degree(&self) -> usize {
+        self.remainder_max_degree
     }
 
     /// Returns a blowup factor of the evaluation domain.
@@ -86,28 +80,15 @@ impl FriOptions {
 
     /// Computes and return the number of FRI layers required for a domain of the specified size.
     ///
-    /// The remainder layer (the last FRI layer) is not included in the returned value.
-    ///
     /// The number of layers for a given domain size is defined by the `folding_factor` and
-    /// `max_remainder_size` settings.
+    /// `remainder_max_degree` and `blowup_factor` settings.
     pub fn num_fri_layers(&self, mut domain_size: usize) -> usize {
         let mut result = 0;
-        while domain_size > self.max_remainder_size {
+        let max_remainder_size = (self.remainder_max_degree + 1) * self.blowup_factor;
+        while domain_size > max_remainder_size {
             domain_size /= self.folding_factor;
             result += 1;
         }
         result
-    }
-
-    /// Computes and returns the size of the remainder layer (the last FRI layer) for a domain of
-    /// the specified size.
-    ///
-    /// The size of the remainder layer for a given domain size is defined by the `folding_factor`
-    /// and `max_remainder_size` settings.
-    pub fn fri_remainder_size(&self, mut domain_size: usize) -> usize {
-        while domain_size > self.max_remainder_size {
-            domain_size /= self.folding_factor;
-        }
-        domain_size
     }
 }

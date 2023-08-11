@@ -1,13 +1,22 @@
 use serde::{ser::SerializeTuple, Serialize};
 use winter_circom_prover::{winterfell::{
     math::{fields::f256::BaseElement, FieldElement},
-    Air, AirContext, Assertion, ByteWriter, EvaluationFrame, FieldExtension, HashFunction,
+    Air, AirContext, Assertion, ByteWriter, EvaluationFrame, FieldExtension,
     ProofOptions, Serializable, TraceInfo,
 }, WinterCircomProofOptions};
+use winter_circom_prover::winterfell::math::ToElements;
 use winter_circom_prover::WinterPublicInputs;
 
-pub(crate) const PROOF_OPTIONS: WinterCircomProofOptions<2> =
-    WinterCircomProofOptions::new(128, 2, 3, [1, 1], 32, 8, 0, 8, 128);
+pub const PROOF_OPTIONS: WinterCircomProofOptions<2> =
+    WinterCircomProofOptions::new(128,
+                                  2,
+                                  3,
+                                  [1, 1],
+                                  32,
+                                  8,
+                                  0,
+                                  8,
+                                  31);
 
 #[derive(Clone, Default)]
 pub struct PublicInputs {
@@ -19,10 +28,16 @@ impl WinterPublicInputs for PublicInputs {
     const NUM_PUB_INPUTS: usize = 2;
 }
 
+impl ToElements<BaseElement> for PublicInputs {
+    fn to_elements(&self) -> Vec<BaseElement> {
+        vec![self.start, self.result]
+    }
+}
+
 impl Serialize for PublicInputs {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
+        where
+            S: serde::Serializer,
     {
         let mut state = serializer.serialize_tuple(2)?;
         state.serialize_element(&self.start)?;
@@ -69,11 +84,16 @@ impl Air for WorkAir {
         let current = &frame.current();
         let next = &frame.next();
 
-        result[0] = next[0] - (current[0] + E::ONE);
-        result[1] = next[1] - (current[1] + current[0] + E::ONE);
+        result[0] = next[0] - (current[0] + E::ONE);                // 0 = 1 - ( 0 + 1 )
+        result[1] = next[1] - (current[1] + current[0] + E::ONE);   // 0 = 2 - ( 1 + 0 + 1 )
     }
 
+    // Here, we'll define a set of assertions about the execution trace which must be satisfied
+    // for the computation to be valid. Essentially, this ties computation's execution trace
+    // to the public inputs.
     fn get_assertions(&self) -> Vec<Assertion<Self::BaseField>> {
+        // for our computation to be valid, value in column 0 at step 0 must be equal to the
+        // starting value, and at the last step it must be equal to the result.
         let last_step = self.trace_length() - 1;
         vec![
             Assertion::single(0, 0, self.start),
@@ -96,10 +116,9 @@ impl Default for WorkAir {
                 32,
                 8,
                 0,
-                HashFunction::Poseidon,
                 FieldExtension::None,
                 8,
-                128,
+                31,
             ),
         )
     }

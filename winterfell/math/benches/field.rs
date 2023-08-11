@@ -12,7 +12,7 @@ use rand_utils::{rand_array, rand_value, rand_vector};
 use std::time::Duration;
 use winter_math::{
     batch_inversion,
-    fields::{f256, f128, f62, f64},
+    fields::{f128, f62, f64},
     fields::{CubeExtension, QuadExtension},
     ExtensibleField, FieldElement, StarkField,
 };
@@ -44,7 +44,7 @@ pub fn field_ops<B>(c: &mut Criterion, field_name: &str)
 where
     B: StarkField + ExtensibleField<2> + ExtensibleField<3>,
 {
-    let mut group = c.benchmark_group(format!("field/{}", field_name));
+    let mut group = c.benchmark_group(format!("field/{field_name}"));
 
     // --- base field -----------------------------------------------------------------------------
 
@@ -52,6 +52,11 @@ where
         let x = rand_value::<B>();
         let y = rand_value::<B>();
         bench.iter(|| black_box(x) + black_box(y))
+    });
+
+    group.bench_function("double", |bench| {
+        let x = rand_value::<B>();
+        bench.iter(|| black_box(x).double())
     });
 
     group.bench_function("sub", |bench| {
@@ -89,6 +94,11 @@ where
             bench.iter(|| black_box(x) + black_box(y))
         });
 
+        group.bench_function("quad/double", |bench| {
+            let x = rand_value::<QuadExtension<B>>();
+            bench.iter(|| black_box(x).double())
+        });
+
         group.bench_function("quad/sub", |bench| {
             let x = rand_value::<QuadExtension<B>>();
             let y = rand_value::<QuadExtension<B>>();
@@ -114,6 +124,11 @@ where
             bench.iter(|| black_box(x) + black_box(y))
         });
 
+        group.bench_function("cube/double", |bench| {
+            let x = rand_value::<CubeExtension<B>>();
+            bench.iter(|| black_box(x).double())
+        });
+
         group.bench_function("cube/sub", |bench| {
             let x = rand_value::<CubeExtension<B>>();
             let y = rand_value::<CubeExtension<B>>();
@@ -131,7 +146,7 @@ where
 // ARRAY OPS
 // ================================================================================================
 pub fn array_ops<E: FieldElement, M: Measurement>(group: &mut BenchmarkGroup<M>, extension: &str) {
-    group.bench_function(format!("{}/array/add", extension), |b| {
+    group.bench_function(format!("{extension}/array/add"), |b| {
         b.iter_batched(
             || (rand_array::<E, 100>(), rand_array::<E, 100>()),
             |(mut x, y)| {
@@ -144,7 +159,7 @@ pub fn array_ops<E: FieldElement, M: Measurement>(group: &mut BenchmarkGroup<M>,
         )
     });
 
-    group.bench_function(format!("{}/array/sub", extension), |b| {
+    group.bench_function(format!("{extension}/array/sub"), |b| {
         b.iter_batched(
             || (rand_array::<E, 100>(), rand_array::<E, 100>()),
             |(mut x, y)| {
@@ -157,7 +172,7 @@ pub fn array_ops<E: FieldElement, M: Measurement>(group: &mut BenchmarkGroup<M>,
         )
     });
 
-    group.bench_function(format!("{}/array/mul", extension), |b| {
+    group.bench_function(format!("{extension}/array/mul"), |b| {
         b.iter_batched(
             || (rand_array::<E, 100>(), rand_array::<E, 100>()),
             |(mut x, y)| {
@@ -174,7 +189,7 @@ pub fn array_ops<E: FieldElement, M: Measurement>(group: &mut BenchmarkGroup<M>,
 // BATCH OPS
 // ================================================================================================
 pub fn batch_ops<E: FieldElement, M: Measurement>(group: &mut BenchmarkGroup<M>, extension: &str) {
-    group.bench_function(format!("{}/batch/add", extension), |b| {
+    group.bench_function(format!("{extension}/batch/add"), |b| {
         b.iter_batched(
             || {
                 (
@@ -202,7 +217,7 @@ pub fn batch_ops<E: FieldElement, M: Measurement>(group: &mut BenchmarkGroup<M>,
         )
     });
 
-    group.bench_function(format!("{}/batch/sub", extension), |b| {
+    group.bench_function(format!("{extension}/batch/sub"), |b| {
         b.iter_batched(
             || {
                 (
@@ -230,7 +245,7 @@ pub fn batch_ops<E: FieldElement, M: Measurement>(group: &mut BenchmarkGroup<M>,
         )
     });
 
-    group.bench_function(format!("{}/batch/mul", extension), |b| {
+    group.bench_function(format!("{extension}/batch/mul"), |b| {
         b.iter_batched(
             || {
                 (
@@ -266,7 +281,6 @@ fn bench_field_ops(c: &mut Criterion) {
     field_ops::<f62::BaseElement>(c, "f62");
     field_ops::<f64::BaseElement>(c, "f64");
     field_ops::<f128::BaseElement>(c, "f128");
-    field_ops::<f256::BaseElement>(c, "f256");
 }
 
 // CRITERION BOILERPLATE

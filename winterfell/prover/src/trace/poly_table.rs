@@ -5,9 +5,9 @@
 
 use crate::{
     matrix::{ColumnIter, MultiColumnIter},
-    Matrix,
+    ColMatrix,
 };
-use math::{log2, FieldElement, StarkField};
+use math::{FieldElement, StarkField};
 use utils::collections::Vec;
 
 // TRACE POLYNOMIAL TABLE
@@ -19,15 +19,15 @@ use utils::collections::Vec;
 /// However, coefficients of the polynomials for the auxiliary trace segments may be either in the
 /// base field, or in the extension field, depending on whether extension field is being used.
 pub struct TracePolyTable<E: FieldElement> {
-    main_segment_polys: Matrix<E::BaseField>,
-    aux_segment_polys: Vec<Matrix<E>>,
+    main_segment_polys: ColMatrix<E::BaseField>,
+    aux_segment_polys: Vec<ColMatrix<E>>,
 }
 
 impl<E: FieldElement> TracePolyTable<E> {
     // CONSTRUCTOR
     // --------------------------------------------------------------------------------------------
     /// Creates a new table of trace polynomials from the provided main trace segment polynomials.
-    pub fn new(main_trace_polys: Matrix<E::BaseField>) -> Self {
+    pub fn new(main_trace_polys: ColMatrix<E::BaseField>) -> Self {
         Self {
             main_segment_polys: main_trace_polys,
             aux_segment_polys: Vec::new(),
@@ -38,7 +38,7 @@ impl<E: FieldElement> TracePolyTable<E> {
     // --------------------------------------------------------------------------------------------
 
     /// Adds the provided auxiliary segment polynomials to this polynomial table.
-    pub fn add_aux_segment(&mut self, aux_segment_polys: Matrix<E>) {
+    pub fn add_aux_segment(&mut self, aux_segment_polys: ColMatrix<E>) {
         assert_eq!(
             self.main_segment_polys.num_rows(),
             aux_segment_polys.num_rows(),
@@ -67,7 +67,7 @@ impl<E: FieldElement> TracePolyTable<E> {
     /// Returns an out-of-domain evaluation frame constructed by evaluating trace polynomials
     /// for all columns at points z and z * g, where g is the generator of the trace domain.
     pub fn get_ood_frame(&self, z: E) -> Vec<Vec<E>> {
-        let g = E::from(E::BaseField::get_root_of_unity(log2(self.poly_size())));
+        let g = E::from(E::BaseField::get_root_of_unity(self.poly_size().ilog2()));
         vec![self.evaluate_at(z), self.evaluate_at(z * g)]
     }
 
@@ -93,6 +93,6 @@ impl<E: FieldElement> TracePolyTable<E> {
     /// Returns a polynomial from the main segment of the trace at the specified index.
     #[cfg(test)]
     pub fn get_main_trace_poly(&self, idx: usize) -> &[E::BaseField] {
-        &self.main_segment_polys.get_column(idx)
+        self.main_segment_polys.get_column(idx)
     }
 }

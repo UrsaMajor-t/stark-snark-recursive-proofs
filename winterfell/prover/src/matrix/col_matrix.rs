@@ -1,4 +1,9 @@
-use super::StarkDomain;
+// Copyright (c) Facebook, Inc. and its affiliates.
+//
+// This source code is licensed under the MIT license found in the
+// LICENSE file in the root directory of this source tree.
+
+use crate::StarkDomain;
 use core::{iter::FusedIterator, slice};
 use crypto::{ElementHasher, MerkleTree};
 use math::{fft, polynom, FieldElement};
@@ -7,7 +12,7 @@ use utils::{batch_iter_mut, collections::Vec, iter, iter_mut, uninit_vector};
 #[cfg(feature = "concurrent")]
 use utils::iterators::*;
 
-// MATRIX
+// COLUMN-MAJOR MATRIX
 // ================================================================================================
 
 /// A two-dimensional matrix of field elements arranged in column-major order.
@@ -23,11 +28,11 @@ use utils::iterators::*;
 /// - All columns must be of the same length.
 /// - Number of rows must be a power of two.
 #[derive(Debug, Clone)]
-pub struct Matrix<E: FieldElement> {
+pub struct ColMatrix<E: FieldElement> {
     columns: Vec<Vec<E>>,
 }
 
-impl<E: FieldElement> Matrix<E> {
+impl<E: FieldElement> ColMatrix<E> {
     // CONSTRUCTOR
     // --------------------------------------------------------------------------------------------
     /// Returns a new [Matrix] instantiated with the data from the specified columns.
@@ -71,6 +76,14 @@ impl<E: FieldElement> Matrix<E> {
         self.columns.len()
     }
 
+    /// Returns the number of base field columns in this matrix.
+    ///
+    /// The number of base field columns is defined as the number of columns multiplied by the
+    /// extension degree of field elements contained in this matrix.
+    pub fn num_base_cols(&self) -> usize {
+        self.num_cols() * E::EXTENSION_DEGREE
+    }
+
     /// Returns the number of rows in this matrix.
     pub fn num_rows(&self) -> usize {
         self.columns[0].len()
@@ -82,6 +95,27 @@ impl<E: FieldElement> Matrix<E> {
     /// Panics if either `col_idx` or `row_idx` are out of bounds for this matrix.
     pub fn get(&self, col_idx: usize, row_idx: usize) -> E {
         self.columns[col_idx][row_idx]
+    }
+
+    /// Returns base field elements located at the specified column and row indexes in this matrix.
+    ///
+    /// For STARK fields, `base_col_idx` is the same as `col_idx` used in `Self::get` method. For
+    /// extension fields, each column in the matrix is viewed as 2 or more columns in the base
+    /// field.
+    ///
+    /// Thus, for example, if we are in a degree 2 extension field, `base_col_idx = 0` would refer
+    /// to the first base element of the first column, `base_col_idx = 1` would refer to the second
+    /// base element of the first column, `base_col_idx = 2` would refer to the first base element
+    /// of the second column etc.
+    ///
+    /// # Panics
+    /// Panics if either `base_col_idx` or `row_idx` are out of bounds for this matrix.
+    pub fn get_base_element(&self, base_col_idx: usize, row_idx: usize) -> E::BaseField {
+        let (col_idx, elem_idx) = (
+            base_col_idx / E::EXTENSION_DEGREE,
+            base_col_idx % E::EXTENSION_DEGREE,
+        );
+        self.columns[col_idx][row_idx].base_element(elem_idx)
     }
 
     /// Set the cell in this matrix at the specified column and row indexes to the provided value.
@@ -122,6 +156,17 @@ impl<E: FieldElement> Matrix<E> {
         }
     }
 
+    /// Merges a column to the end of the matrix provided its length matches the matrix.
+    ///
+    /// # Panics
+    /// Panics if the column has a different length to other columns in the matrix.
+    pub fn merge_column(&mut self, column: Vec<E>) {
+        if let Some(first_column) = self.columns.first() {
+            assert_eq!(first_column.len(), column.len());
+        }
+        self.columns.push(column);
+    }
+
     // ITERATION
     // --------------------------------------------------------------------------------------------
 
@@ -150,10 +195,14 @@ impl<E: FieldElement> Matrix<E> {
     ///   coefficients of a degree `num_rows - 1` polynomial.
     pub fn interpolate_columns(&self) -> Self {
         let inv_twiddles = fft::get_inv_twiddles::<E::BaseField>(self.num_rows());
-        // TODO: get ride of cloning by introducing another version of fft::interpolate_poly()
-        let mut result = self.clone();
-        iter_mut!(result.columns).for_each(|column| fft::interpolate_poly(column, &inv_twiddles));
-        result
+        let columns = iter!(self.columns)
+            .map(|evaluations| {
+                let mut column = evaluations.clone();
+                fft::interpolate_poly(&mut column, &inv_twiddles);
+                column
+            })
+            .collect();
+        Self { columns }
     }
 
     /// Interpolates columns of the matrix into polynomials in coefficient form and returns the
@@ -256,12 +305,12 @@ impl<E: FieldElement> Matrix<E> {
 // ================================================================================================
 
 pub struct ColumnIter<'a, E: FieldElement> {
-    matrix: &'a Matrix<E>,
+    matrix: &'a ColMatrix<E>,
     cursor: usize,
 }
 
 impl<'a, E: FieldElement> ColumnIter<'a, E> {
-    pub fn new(matrix: &'a Matrix<E>) -> Self {
+    pub fn new(matrix: &'a ColMatrix<E>) -> Self {
         Self { matrix, cursor: 0 }
     }
 }
@@ -293,12 +342,12 @@ impl<'a, E: FieldElement> FusedIterator for ColumnIter<'a, E> {}
 // ================================================================================================
 
 pub struct ColumnIterMut<'a, E: FieldElement> {
-    matrix: &'a mut Matrix<E>,
+    matrix: &'a mut ColMatrix<E>,
     cursor: usize,
 }
 
 impl<'a, E: FieldElement> ColumnIterMut<'a, E> {
-    pub fn new(matrix: &'a mut Matrix<E>) -> Self {
+    pub fn new(matrix: &'a mut ColMatrix<E>) -> Self {
         Self { matrix, cursor: 0 }
     }
 }
@@ -335,13 +384,13 @@ impl<'a, E: FieldElement> FusedIterator for ColumnIterMut<'a, E> {}
 // ================================================================================================
 
 pub struct MultiColumnIter<'a, E: FieldElement> {
-    matrixes: &'a [Matrix<E>],
+    matrixes: &'a [ColMatrix<E>],
     m_cursor: usize,
     c_cursor: usize,
 }
 
 impl<'a, E: FieldElement> MultiColumnIter<'a, E> {
-    pub fn new(matrixes: &'a [Matrix<E>]) -> Self {
+    pub fn new(matrixes: &'a [ColMatrix<E>]) -> Self {
         // make sure all matrixes have the same number of rows
         if !matrixes.is_empty() {
             let num_rows = matrixes[0].num_rows();

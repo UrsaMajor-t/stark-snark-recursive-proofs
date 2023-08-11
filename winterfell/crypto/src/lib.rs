@@ -29,8 +29,10 @@ pub mod hashers {
 
     pub use super::hash::Blake3_192;
     pub use super::hash::Blake3_256;
+    pub use super::hash::GriffinJive64_256;
     pub use super::hash::Rp62_248;
     pub use super::hash::Rp64_256;
+    pub use super::hash::RpJive64_256;
     pub use super::hash::Sha3_256;
     pub use super::hash::Poseidon;
 }
@@ -42,7 +44,7 @@ pub use merkle::{build_merkle_nodes, BatchMerkleProof, MerkleTree};
 pub use merkle::concurrent;
 
 mod random;
-pub use random::RandomCoin;
+pub use random::{DefaultRandomCoin, RandomCoin};
 
 mod errors;
 pub use errors::{MerkleTreeError, RandomCoinError};

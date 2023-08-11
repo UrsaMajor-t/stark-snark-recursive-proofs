@@ -3,14 +3,16 @@ use std::{
     fs::{create_dir_all, File},
     io::Write,
 };
+use std::time::Instant;
 
 use colored::Colorize;
 use rug::{ops::Pow, Float};
 use winterfell::{
     crypto::hashers::Poseidon,
     math::{fields::f256::BaseElement, log2, StarkField},
-    Air, AirContext, HashFunction, Prover, TraceInfo,
+    Air, AirContext, Prover, TraceInfo,
 };
+use winterfell::crypto::{DefaultRandomCoin, ElementHasher};
 
 use crate::{
     json::proof_to_json,
@@ -87,14 +89,15 @@ pub fn circom_verify(
 /// by the [circom_verify] function.
 ///
 /// See [crate documentation](crate) for more information.
-pub fn circom_prove<P>(
+pub fn circom_prove<P,H>(
     prover: P,
     trace: <P as Prover>::Trace,
     circuit_name: &str,
     logging_level: LoggingLevel,
 ) -> Result<(), WinterCircomError>
 where
-    P: Prover<BaseField = BaseElement>,
+    P: Prover<BaseField = BaseElement,HashFn = H>,
+    H: ElementHasher<BaseField = BaseElement>,
     <<P as Prover>::Air as Air>::PublicInputs: WinterPublicInputs,
 {
     // CHECK FOR FILES
@@ -116,7 +119,7 @@ where
         println!("{}", "Building STARK proof...".green());
     }
 
-    assert_eq!(prover.options().hash_fn(), HashFunction::Poseidon);
+    // assert_eq!(hash_fn, HashFunction::Poseidon);
 
     let pub_inputs = prover.get_pub_inputs(&trace);
     let proof = prover
@@ -126,13 +129,13 @@ where
     // VERIFY PROOF
     // ===========================================================================
 
-    #[cfg(debug_assertions)]
+    // #[cfg(debug_assertions)]
     {
         if logging_level.print_big_steps() {
             println!("{}", "Verifying STARK proof...".green());
         }
 
-        winterfell::verify::<P::Air>(proof.clone(), pub_inputs.clone())
+        winterfell::verify::<P::Air, H, DefaultRandomCoin<H>>(proof.clone(), pub_inputs.clone())
             .map_err(|err| WinterCircomError::InvalidProof(Some(err)))?;
     }
 
@@ -152,7 +155,7 @@ where
 
     // convert proof to json object
     let mut fri_tree_depths = Vec::new();
-    let json = proof_to_json::<P::Air, Poseidon<BaseElement>>(
+    let json = proof_to_json::<P::Air, H,DefaultRandomCoin<H>>(
         proof,
         &air,
         pub_inputs.clone(),
@@ -221,10 +224,10 @@ where
 
     delete_file(format!("target/circom/{}/proof.json", circuit_name));
     delete_file(format!("target/circom/{}/public.json", circuit_name));
+    let start = Instant::now();
     command_execution(
-        Executable::SnarkJS,
+        Executable::RapidSnark,
         &[
-            "g16p",
             "verifier.zkey",
             "witness.wtns",
             "proof.json",
@@ -233,6 +236,8 @@ where
         Some(&format!("target/circom/{}", circuit_name)),
         &logging_level,
     )?;
+    let duration = start.elapsed();
+    println!("{} {:?}", "Time to create proof is: ".green(), duration);
     check_file(
         format!("target/circom/{}/public.json", circuit_name),
         Some("proof must have failed"),

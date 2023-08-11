@@ -74,6 +74,7 @@ impl FieldElement for BaseElement {
     type PositiveInteger = U256;
     type BaseField = Self;
 
+    const EXTENSION_DEGREE: usize = 1;
     const ELEMENT_BYTES: usize = ELEMENT_BYTES;
     const IS_CANONICAL: bool = true;
 
@@ -87,6 +88,13 @@ impl FieldElement for BaseElement {
 
     fn conjugate(&self) -> Self {
         BaseElement(self.0)
+    }
+
+    fn base_element(&self, i: usize) -> Self::BaseField {
+        match i {
+            0 => *self,
+            _ => panic!("element index must be 0, but was {i}"),
+        }
     }
 
     fn elements_as_bytes(elements: &[Self]) -> &[u8] {
@@ -115,7 +123,11 @@ impl FieldElement for BaseElement {
         Ok(slice::from_raw_parts(p as *const Self, len))
     }
 
-    fn as_base_elements(elements: &[Self]) -> &[Self::BaseField] {
+    fn slice_as_base_elements(elements: &[Self]) -> &[Self::BaseField] {
+        elements
+    }
+
+    fn slice_from_base_elements(elements: &[Self::BaseField]) -> &[Self] {
         elements
     }
 }
@@ -368,13 +380,13 @@ impl Serializable for BaseElement {
     fn write_into<W: utils::ByteWriter>(&self, target: &mut W) {
         let mut bytes = [0u8; ELEMENT_BYTES];
         self.0.to_little_endian(&mut bytes);
-        target.write_u8_slice(&bytes);
+        target.write_bytes(&bytes);
     }
 }
 
 impl Deserializable for BaseElement {
     fn read_from<R: utils::ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
-        let value = U256::from_little_endian(&source.read_u8_array::<32>()?);
+        let value = U256::from_little_endian(&source.read_array::<32>()?);
         if value >= M {
             return Err(DeserializationError::InvalidValue(format!(
                 "invalid field element: value {} is greater than or equal to the field modulus",

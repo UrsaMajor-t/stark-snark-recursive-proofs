@@ -35,31 +35,28 @@ extern crate alloc;
 pub use air::{
     proof::StarkProof, Air, AirContext, Assertion, AuxTraceRandElements, BoundaryConstraint,
     BoundaryConstraintGroup, ConstraintCompositionCoefficients, ConstraintDivisor,
-    DeepCompositionCoefficients, EvaluationFrame, FieldExtension, HashFunction, ProofOptions,
-    TraceInfo, TransitionConstraintDegree, TransitionConstraintGroup,
+    DeepCompositionCoefficients, EvaluationFrame, FieldExtension, ProofOptions, TraceInfo,
+    TransitionConstraintDegree,
 };
 
 pub use math;
 use math::{
     fields::{CubeExtension, QuadExtension},
-    FieldElement,
+    FieldElement, ToElements,
 };
 
-use utils::collections::Vec;
 pub use utils::{
     ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable, SliceReader,
 };
 
 pub use crypto;
-use crypto::{
-    hashers::{Blake3_192, Blake3_256, Sha3_256,Poseidon},
-    ElementHasher, RandomCoin,
-};
+use crypto::{ElementHasher, RandomCoin};
 
 use fri::FriVerifier;
 
-mod channel;
+ mod channel;
 use channel::VerifierChannel;
+pub use channel::ConstraintQueries;
 
 mod evaluator;
 use evaluator::evaluate_constraints;
@@ -74,7 +71,7 @@ pub use errors::VerifierError;
 // ================================================================================================
 /// Verifies that the specified computation was executed correctly against the specified inputs.
 ///
-/// Specifically, for a computation specified by `AIR` type parameter, verifies that the provided
+/// Specifically, for a computation specified by `AIR` and `HashFn` type parameter, verifies that the provided
 /// `proof` attests to the correct execution of the computation against public inputs specified
 /// by `pub_inputs`. If the verification is successful, `Ok(())` is returned.
 ///
@@ -84,99 +81,47 @@ pub use errors::VerifierError;
 /// - The specified proof was generated for a different computation.
 /// - The specified proof was generated for this computation but for different public inputs.
 #[rustfmt::skip]
-pub fn verify<AIR: Air>(
+pub fn verify<AIR, HashFn, RandCoin>(
     proof: StarkProof,
     pub_inputs: AIR::PublicInputs,
-) -> Result<(), VerifierError> {
-    // build a seed for the public coin; the initial seed is the hash of public inputs and proof
-    // context, but as the protocol progresses, the coin will be reseeded with the info received
-    // from the prover
-    let mut public_coin_seed = Vec::new();
-    pub_inputs.write_into(&mut public_coin_seed);
-    proof.context.write_into(&mut public_coin_seed);
-
+) -> Result<(), VerifierError> 
+where 
+    AIR: Air, 
+    HashFn: ElementHasher<BaseField = AIR::BaseField>,
+    RandCoin: RandomCoin<BaseField = AIR::BaseField, Hasher = HashFn>,
+{
+    // build a seed for the public coin; the initial seed is a hash of the proof context and the
+    // public inputs, but as the protocol progresses, the coin will be reseeded with the info
+    // received from the prover
+    let mut public_coin_seed = proof.context.to_elements();
+    public_coin_seed.append(&mut pub_inputs.to_elements());
+    
     // create AIR instance for the computation specified in the proof
     let air = AIR::new(proof.get_trace_info(), pub_inputs, proof.options().clone());
 
     // figure out which version of the generic proof verification procedure to run. this is a sort
     // of static dispatch for selecting two generic parameter: extension field and hash function.
     match air.options().field_extension() {
-        FieldExtension::None => match air.options().hash_fn() {
-            HashFunction::Blake3_256 => {
-                let public_coin = RandomCoin::new(&public_coin_seed);
-                let channel = VerifierChannel::new(&air, proof)?;
-                perform_verification::<AIR, AIR::BaseField, Blake3_256<AIR::BaseField>>(air, channel, public_coin)
-
-            }
-            HashFunction::Blake3_192 => {
-                let public_coin = RandomCoin::new(&public_coin_seed);
-                let channel = VerifierChannel::new(&air, proof)?;
-                perform_verification::<AIR, AIR::BaseField, Blake3_192<AIR::BaseField>>(air, channel, public_coin)
-            }
-            HashFunction::Sha3_256 => {
-                let public_coin = RandomCoin::new(&public_coin_seed);
-                let channel = VerifierChannel::new(&air, proof)?;
-                perform_verification::<AIR, AIR::BaseField, Sha3_256<AIR::BaseField>>(air, channel, public_coin)
-            }
-            HashFunction::Poseidon => {
-                let public_coin = RandomCoin::new(&public_coin_seed);
-                let channel = VerifierChannel::new(&air, proof)?;
-                perform_verification::<AIR, AIR::BaseField, Poseidon<AIR::BaseField>>(air, channel, public_coin)
-            }
+        FieldExtension::None => {
+            let public_coin = RandCoin::new(&public_coin_seed);
+            let channel = VerifierChannel::new(&air, proof)?;
+            perform_verification::<AIR, AIR::BaseField, HashFn, RandCoin>(air, channel, public_coin)
         },
         FieldExtension::Quadratic => {
             if !<QuadExtension<AIR::BaseField>>::is_supported() {
                 return Err(VerifierError::UnsupportedFieldExtension(2));
             }
-            match air.options().hash_fn() {
-                HashFunction::Blake3_256 => {
-                    let public_coin = RandomCoin::new(&public_coin_seed);
-                    let channel = VerifierChannel::new(&air, proof)?;
-                    perform_verification::<AIR, QuadExtension<AIR::BaseField>, Blake3_256<AIR::BaseField>>(air, channel, public_coin)
-                }
-                HashFunction::Blake3_192 => {
-                    let public_coin = RandomCoin::new(&public_coin_seed);
-                    let channel = VerifierChannel::new(&air, proof)?;
-                    perform_verification::<AIR, QuadExtension<AIR::BaseField>, Blake3_192<AIR::BaseField>>(air, channel, public_coin)
-                }
-                HashFunction::Sha3_256 => {
-                    let public_coin = RandomCoin::new(&public_coin_seed);
-                    let channel = VerifierChannel::new(&air, proof)?;
-                    perform_verification::<AIR, QuadExtension<AIR::BaseField>, Sha3_256<AIR::BaseField>>(air, channel, public_coin)
-                }
-                HashFunction::Poseidon => {
-                    let public_coin = RandomCoin::new(&public_coin_seed);
-                    let channel = VerifierChannel::new(&air, proof)?;
-                    perform_verification::<AIR, QuadExtension<AIR::BaseField>, Poseidon<AIR::BaseField>>(air, channel, public_coin)
-                }
-            }
+            let public_coin = RandCoin::new(&public_coin_seed);
+            let channel = VerifierChannel::new(&air, proof)?;
+            perform_verification::<AIR, QuadExtension<AIR::BaseField>, HashFn, RandCoin>(air, channel, public_coin)
         },
         FieldExtension::Cubic => {
             if !<CubeExtension<AIR::BaseField>>::is_supported() {
                 return Err(VerifierError::UnsupportedFieldExtension(3));
             }
-            match air.options().hash_fn() {
-                HashFunction::Blake3_256 => {
-                    let public_coin = RandomCoin::new(&public_coin_seed);
-                    let channel = VerifierChannel::new(&air, proof)?;
-                    perform_verification::<AIR, CubeExtension<AIR::BaseField>, Blake3_256<AIR::BaseField>>(air, channel, public_coin)
-                }
-                HashFunction::Blake3_192 => {
-                    let public_coin = RandomCoin::new(&public_coin_seed);
-                    let channel = VerifierChannel::new(&air, proof)?;
-                    perform_verification::<AIR, CubeExtension<AIR::BaseField>, Blake3_192<AIR::BaseField>>(air, channel, public_coin)
-                }
-                HashFunction::Sha3_256 => {
-                    let public_coin = RandomCoin::new(&public_coin_seed);
-                    let channel = VerifierChannel::new(&air, proof)?;
-                    perform_verification::<AIR, CubeExtension<AIR::BaseField>, Sha3_256<AIR::BaseField>>(air, channel, public_coin)
-                }
-                HashFunction::Poseidon => {
-                    let public_coin = RandomCoin::new(&public_coin_seed);
-                    let channel = VerifierChannel::new(&air, proof)?;
-                    perform_verification::<AIR, CubeExtension<AIR::BaseField>, Poseidon<AIR::BaseField>>(air, channel, public_coin)
-                }
-            }
+            let public_coin = RandCoin::new(&public_coin_seed);
+            let channel = VerifierChannel::new(&air, proof)?;
+            perform_verification::<AIR, CubeExtension<AIR::BaseField>, HashFn, RandCoin>(air, channel, public_coin)
         },
     }
 }
@@ -185,15 +130,16 @@ pub fn verify<AIR: Air>(
 // ================================================================================================
 /// Performs the actual verification by reading the data from the `channel` and making sure it
 /// attests to a correct execution of the computation specified by the provided `air`.
-fn perform_verification<A, E, H>(
+fn perform_verification<A, E, H, R>(
     air: A,
     mut channel: VerifierChannel<E, H>,
-    mut public_coin: RandomCoin<A::BaseField, H>,
+    mut public_coin: R,
 ) -> Result<(), VerifierError>
 where
     A: Air,
     E: FieldElement<BaseField = A::BaseField>,
     H: ElementHasher<BaseField = A::BaseField>,
+    R: RandomCoin<BaseField = A::BaseField, Hasher = H>,
 {
     // 1 ----- trace commitment -------------------------------------------------------------------
     // Read the commitments to evaluations of the trace polynomials over the LDE domain sent by the
@@ -243,7 +189,9 @@ where
     // read the out-of-domain trace frames (the main trace frame and auxiliary trace frame, if
     // provided) sent by the prover and evaluate constraints over them; also, reseed the public
     // coin with the OOD frames received from the prover.
-    let (ood_main_trace_frame, ood_aux_trace_frame) = channel.read_ood_trace_frame();
+    let ood_trace_frame = channel.read_ood_trace_frame();
+    let ood_main_trace_frame = ood_trace_frame.main_frame();
+    let ood_aux_trace_frame = ood_trace_frame.aux_frame();
     let ood_constraint_evaluation_1 = evaluate_constraints(
         &air,
         constraint_coeffs,
@@ -252,37 +200,23 @@ where
         aux_trace_rand_elements,
         z,
     );
-
-
-    if let Some(ref aux_trace_frame) = ood_aux_trace_frame {
-        // when the trace contains auxiliary segments, append auxiliary trace elements at the
-        // end of main trace elements for both current and next rows in the frame. this is
-        // needed to be consistent with how the prover writes OOD frame into the channel.
-
-        let mut current = ood_main_trace_frame.current().to_vec();
-        current.extend_from_slice(aux_trace_frame.current());
-        public_coin.reseed(H::hash_elements(&current));
-
-        let mut next = ood_main_trace_frame.next().to_vec();
-        next.extend_from_slice(aux_trace_frame.next());
-        public_coin.reseed(H::hash_elements(&next));
-    } else {
-        public_coin.reseed(H::hash_elements(ood_main_trace_frame.current()));
-        public_coin.reseed(H::hash_elements(ood_main_trace_frame.next()));
-    }
-
+    public_coin.reseed(H::hash_elements(ood_trace_frame.values()));
 
     // read evaluations of composition polynomial columns sent by the prover, and reduce them into
-    // a single value by computing sum(z^i * value_i), where value_i is the evaluation of the ith
-    // column polynomial at z^m, where m is the total number of column polynomials; also, reseed
-    // the public coin with the OOD constraint evaluations received from the prover.
+    // a single value by computing \sum_{i=0}^{m-1}(z^(i * l) * value_i), where value_i is the
+    // evaluation of the ith column polynomial H_i(X) at z, l is the trace length and m is
+    // the number of composition column polynomials. This computes H(z) (i.e.
+    // the evaluation of the composition polynomial at z) using the fact that
+    // H(X) = \sum_{i=0}^{m-1} X^{i * l} H_i(X).
+    // Also, reseed the public coin with the OOD constraint evaluations received from the prover.
     let ood_constraint_evaluations = channel.read_ood_constraint_evaluations();
-    let ood_constraint_evaluation_2 = ood_constraint_evaluations
-        .iter()
-        .enumerate()
-        .fold(E::ZERO, |result, (i, &value)| {
-            result + z.exp((i as u32).into()) * value
-        });
+    let ood_constraint_evaluation_2 =
+        ood_constraint_evaluations
+            .iter()
+            .enumerate()
+            .fold(E::ZERO, |result, (i, &value)| {
+                result + z.exp_vartime(((i * (air.trace_length())) as u32).into()) * value
+            });
     public_coin.reseed(H::hash_elements(&ood_constraint_evaluations));
 
     // finally, make sure the values are the same
@@ -296,7 +230,7 @@ where
     // and the prover uses them to compute the DEEP composition polynomial. the prover, then
     // applies FRI protocol to the evaluations of the DEEP composition polynomial.
     let deep_coefficients = air
-        .get_deep_composition_coefficients::<E, H>(&mut public_coin)
+        .get_deep_composition_coefficients::<E, R>(&mut public_coin)
         .map_err(|_| VerifierError::RandomCoinError)?;
 
     // instantiates a FRI verifier with the FRI layer commitments read from the channel. From the

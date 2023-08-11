@@ -39,12 +39,12 @@ mod errors;
 pub use errors::AssertionError;
 
 mod options;
-pub use options::{FieldExtension, HashFunction, ProofOptions};
+pub use options::{FieldExtension, ProofOptions};
 
 mod air;
 pub use air::{
     Air, AirContext, Assertion, AuxTraceRandElements, BoundaryConstraint, BoundaryConstraintGroup,
     BoundaryConstraints, ConstraintCompositionCoefficients, ConstraintDivisor,
     DeepCompositionCoefficients, EvaluationFrame, TraceInfo, TraceLayout,
-    TransitionConstraintDegree, TransitionConstraintGroup, TransitionConstraints,
+    TransitionConstraintDegree, TransitionConstraints,
 };

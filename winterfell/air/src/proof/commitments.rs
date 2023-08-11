@@ -75,7 +75,7 @@ impl Commitments {
         // parse constraint evaluation commitment:
         let constraint_commitment = H::Digest::read_from(&mut reader)?;
 
-        // read FRI commitments (+1 is for FRI remainder commitment)
+        // read FRI commitments (+ 1 for remainder polynomial commitment)
         let fri_commitments = H::Digest::read_batch_from(&mut reader, num_fri_layers + 1)?;
 
         // make sure we consumed all available commitment bytes
@@ -91,7 +91,7 @@ impl Serializable for Commitments {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
         assert!(self.0.len() < u16::MAX as usize);
         target.write_u16(self.0.len() as u16);
-        target.write_u8_slice(&self.0);
+        target.write_bytes(&self.0);
     }
 }
 
@@ -103,7 +103,7 @@ impl Deserializable for Commitments {
     /// `source`.
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
         let num_bytes = source.read_u16()? as usize;
-        let result = source.read_u8_vec(num_bytes)?;
+        let result = source.read_vec(num_bytes)?;
         Ok(Commitments(result))
     }
 }

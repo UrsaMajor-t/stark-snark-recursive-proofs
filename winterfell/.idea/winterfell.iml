@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<module type="CPP_MODULE" version="4">
+  <component name="NewModuleRootManager">
+    <content url="file://$MODULE_DIR$">
+      <sourceFolder url="file://$MODULE_DIR$/air/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crypto/benches" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/crypto/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/examples/benches" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/examples/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/fri/benches" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/fri/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/math/benches" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/math/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/prover/benches" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/prover/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/utils/core/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/utils/rand/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/verifier/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/winterfell/src" isTestSource="false" />
+      <excludeFolder url="file://$MODULE_DIR$/target" />
+    </content>
+    <orderEntry type="inheritedJdk" />
+    <orderEntry type="sourceFolder" forTests="false" />
+  </component>
+</module>

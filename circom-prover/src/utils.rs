@@ -90,6 +90,7 @@ impl Debug for WinterCircomError {
 pub(crate) enum Executable {
     Circom,
     SnarkJS,
+    RapidSnark,
     Make,
     Custom {
         path: String,
@@ -100,8 +101,9 @@ pub(crate) enum Executable {
 impl Executable {
     fn executable_path(&self) -> Result<PathBuf, WinterCircomError> {
         Ok(match self {
-            Self::Circom => canonicalize("iden3/circom/target/release/circom")?,
-            Self::SnarkJS => canonicalize("iden3/snarkjs/build/cli.cjs")?,
+            Self::Circom => canonicalize("language/circom/target/release/circom")?,
+            Self::SnarkJS => canonicalize("language/snarkjs/build/cli.cjs")?,
+            Self::RapidSnark => canonicalize("language/rapidsnark/build/prover")?,
             Self::Make => "make".into(),
             Self::Custom { path, .. } => canonicalize(path)?,
         })
@@ -111,6 +113,7 @@ impl Executable {
         match self {
             Self::Circom => String::from("circom"),
             Self::SnarkJS => String::from("snarkjs"),
+            Self::RapidSnark=>String::from("rapidsnark"),
             Self::Make => String::from("make"),
             Self::Custom { path, .. } => Path::new(path)
                 .file_name()
@@ -146,6 +149,7 @@ pub(crate) fn command_execution(
     for arg in args {
         command.arg(arg);
     }
+
     if let Some(dir) = current_dir {
         command.current_dir(dir);
     }
@@ -226,6 +230,7 @@ pub(crate) fn delete_directory(path: String) {
 // ===========================================================================
 
 /// Logging level selector for functions of this crate.
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub enum LoggingLevel {
     /// Nothing is printed to stdout (errors are still printed to stderr)
     Quiet,

@@ -8,7 +8,7 @@
 use crate::{folding::fold_positions, utils::map_positions_to_indexes, FriOptions, VerifierError};
 use core::{convert::TryInto, marker::PhantomData, mem};
 use crypto::{ElementHasher, RandomCoin};
-use math::{fft, log2, polynom, FieldElement, StarkField};
+use math::{polynom, FieldElement, StarkField};
 use utils::collections::Vec;
 
 mod channel;
@@ -55,29 +55,30 @@ pub use channel::{DefaultVerifierChannel, VerifierChannel};
 /// * The degree of the polynomial implied by evaluations at the last FRI layer (the remainder)
 ///   is smaller than the degree resulting from reducing degree *d* by `folding_factor` at each
 ///   FRI layer.
-pub struct FriVerifier<B, E, C, H>
+pub struct FriVerifier<E, C, H, R>
 where
-    B: StarkField,
-    E: FieldElement<BaseField = B>,
+    E: FieldElement,
     C: VerifierChannel<E, Hasher = H>,
-    H: ElementHasher<BaseField = B>,
+    H: ElementHasher<BaseField = E::BaseField>,
+    R: RandomCoin<BaseField = E::BaseField, Hasher = H>,
 {
     max_poly_degree: usize,
     domain_size: usize,
-    domain_generator: B,
+    domain_generator: E::BaseField,
     layer_commitments: Vec<H::Digest>,
     layer_alphas: Vec<E>,
     options: FriOptions,
     num_partitions: usize,
     _channel: PhantomData<C>,
+    _public_coin: PhantomData<R>,
 }
 
-impl<B, E, C, H> FriVerifier<B, E, C, H>
+impl<E, C, H, R> FriVerifier<E, C, H, R>
 where
-    B: StarkField,
-    E: FieldElement<BaseField = B>,
+    E: FieldElement,
     C: VerifierChannel<E, Hasher = H>,
-    H: ElementHasher<BaseField = B>,
+    H: ElementHasher<BaseField = E::BaseField>,
+    R: RandomCoin<BaseField = E::BaseField, Hasher = H>,
 {
     /// Returns a new instance of FRI verifier created from the specified parameters.
     ///
@@ -100,13 +101,13 @@ where
     /// * An error was encountered while drawing a random α value from the coin.
     pub fn new(
         channel: &mut C,
-        public_coin: &mut RandomCoin<B, H>,
+        public_coin: &mut R,
         options: FriOptions,
         max_poly_degree: usize,
     ) -> Result<Self, VerifierError> {
         // infer evaluation domain info
         let domain_size = max_poly_degree.next_power_of_two() * options.blowup_factor();
-        let domain_generator = B::get_root_of_unity(log2(domain_size));
+        let domain_generator = E::BaseField::get_root_of_unity(domain_size.ilog2());
 
         let num_partitions = channel.read_fri_num_partitions();
 
@@ -116,7 +117,7 @@ where
         let mut max_degree_plus_1 = max_poly_degree + 1;
         for (depth, commitment) in layer_commitments.iter().enumerate() {
             public_coin.reseed(*commitment);
-            let alpha = public_coin.draw().map_err(VerifierError::PublicCoinError)?;
+            let alpha = public_coin.draw().map_err(VerifierError::RandomCoinError)?;
             layer_alphas.push(alpha);
 
             // make sure the degree can be reduced by the folding factor at all layers
@@ -142,6 +143,7 @@ where
             options,
             num_partitions,
             _channel: PhantomData,
+            _public_coin: PhantomData,
         })
     }
 
@@ -215,6 +217,7 @@ where
         // static dispatch for folding factor parameter
         let folding_factor = self.options.folding_factor();
         match folding_factor {
+            2 => self.verify_generic::<2>(channel, evaluations, positions),
             4 => self.verify_generic::<4>(channel, evaluations, positions),
             8 => self.verify_generic::<8>(channel, evaluations, positions),
             16 => self.verify_generic::<16>(channel, evaluations, positions),
@@ -234,7 +237,7 @@ where
         let folding_roots = (0..N)
             .map(|i| {
                 self.domain_generator
-                    .exp(((self.domain_size / N * i) as u64).into())
+                    .exp_vartime(((self.domain_size / N * i) as u64).into())
             })
             .collect::<Vec<_>>();
 
@@ -269,7 +272,7 @@ where
             // build a set of x coordinates for each row polynomial
             #[rustfmt::skip]
             let xs = folded_positions.iter().map(|&i| {
-                let xe = domain_generator.exp((i as u64).into()) * self.options.domain_offset();
+                let xe = domain_generator.exp_vartime((i as u64).into()) * self.options.domain_offset();
                 folding_roots.iter()
                     .map(|&r| E::from(xe * r))
                     .collect::<Vec<_>>().try_into().unwrap()
@@ -296,52 +299,34 @@ where
             }
 
             // update variables for the next iteration of the loop
-            domain_generator = domain_generator.exp((N as u32).into());
+            domain_generator = domain_generator.exp_vartime((N as u32).into());
             max_degree_plus_1 /= N;
             domain_size /= N;
             mem::swap(&mut positions, &mut folded_positions);
         }
 
-        // 2 ----- verify the remainder of the FRI proof ----------------------------------------------
+        // 2 ----- verify the remainder polynomial of the FRI proof -------------------------------
 
-        // read the remainder from the channel and make sure it matches with the columns
-        // of the previous layer
-        let remainder_commitment = self.layer_commitments.last().unwrap();
-        let remainder = channel.read_remainder::<N>(remainder_commitment)?;
+        // read the remainder polynomial from the channel and make sure it agrees with the evaluations
+        // from the previous layer.
+        let remainder_poly = channel.read_remainder()?;
+        if remainder_poly.len() > max_degree_plus_1 {
+            return Err(VerifierError::RemainderDegreeMismatch(
+                max_degree_plus_1 - 1,
+            ));
+        }
+        let offset: E::BaseField = self.options().domain_offset();
+
         for (&position, evaluation) in positions.iter().zip(evaluations) {
-            if remainder[position] != evaluation {
+            let comp_eval = eval_horner::<E>(
+                &remainder_poly,
+                offset * domain_generator.exp_vartime((position as u64).into()),
+            );
+            if comp_eval != evaluation {
                 return Err(VerifierError::InvalidRemainderFolding);
             }
         }
 
-        // make sure the remainder values satisfy the degree
-        verify_remainder(remainder, max_degree_plus_1 - 1)
-    }
-}
-
-// REMAINDER DEGREE VERIFICATION
-// ================================================================================================
-/// Returns Ok(true) if values in the `remainder` slice represent evaluations of a polynomial
-/// with degree <= `max_degree` against a domain of the same size as `remainder`.
-fn verify_remainder<B: StarkField, E: FieldElement<BaseField = B>>(
-    mut remainder: Vec<E>,
-    max_degree: usize,
-) -> Result<(), VerifierError> {
-    if max_degree >= remainder.len() - 1 {
-        return Err(VerifierError::RemainderDegreeNotValid);
-    }
-
-    // interpolate remainder polynomial from its evaluations; we don't shift the domain here
-    // because the degree of the polynomial will not change as long as we interpolate over a
-    // coset of the original domain.
-    let inv_twiddles = fft::get_inv_twiddles(remainder.len());
-    fft::interpolate_poly(&mut remainder, &inv_twiddles);
-    let poly = remainder;
-
-    // make sure the degree is valid
-    if max_degree < polynom::degree_of(&poly) {
-        Err(VerifierError::RemainderDegreeMismatch(max_degree))
-    } else {
         Ok(())
     }
 }
@@ -367,4 +352,14 @@ fn get_query_values<E: FieldElement, const N: usize>(
     }
 
     result
+}
+
+// Evaluates a polynomial with coefficients in an extension field at a point in the base field.
+pub fn eval_horner<E>(p: &[E], x: E::BaseField) -> E
+where
+    E: FieldElement,
+{
+    p.iter()
+        .rev()
+        .fold(E::ZERO, |acc, &coeff| acc * E::from(x) + coeff)
 }

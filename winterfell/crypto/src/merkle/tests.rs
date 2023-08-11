@@ -3,12 +3,9 @@
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the root directory of this source tree.
 
-use std::collections::HashSet;
-
 use super::*;
 use math::fields::f128::BaseElement;
 use proptest::prelude::*;
-use rand_utils::rand_array;
 
 type Digest256 = crate::hash::ByteDigest<32>;
 type Blake3_256 = crate::hash::Blake3_256<BaseElement>;
@@ -236,42 +233,27 @@ fn verify_batch() {
 }
 
 #[test]
-fn to_paths() {
-    const SIZE: usize = 32;
-    let leaves = rand_array::<u128, SIZE>()
-        .iter()
-        .map(|leaf| Blake3_256::hash(&leaf.to_le_bytes()))
-        .collect::<Vec<_>>();
-    let depth = log2(leaves.len()) as usize;
+fn verify_into_paths() {
+    let leaves = Digest256::bytes_as_digests(&LEAVES8).to_vec();
     let tree = MerkleTree::<Blake3_256>::new(leaves).unwrap();
 
-    // generate a list of random unique indexes
-    let indexes: Vec<usize> = rand_array::<u64, 5>().map(|e| e as usize % SIZE).to_vec();
-    let indexes = indexes
-        .iter()
-        .cloned()
-        .collect::<HashSet<_>>()
-        .drain()
-        .collect::<Vec<_>>();
+    let proof1 = tree.prove(1).unwrap();
+    let proof2 = tree.prove(2).unwrap();
+    let proof1_2 = tree.prove_batch(&[1, 2]).unwrap();
+    let result = proof1_2.into_paths(&[1, 2]).unwrap();
 
-    let proof = tree.prove_batch(&indexes).unwrap();
-    let paths = proof.to_paths(&indexes).unwrap();
+    assert_eq!(proof1, result[0]);
+    assert_eq!(proof2, result[1]);
 
-    assert_eq!(proof.get_root(&indexes).unwrap(), *tree.root());
+    let proof3 = tree.prove(3).unwrap();
+    let proof4 = tree.prove(4).unwrap();
+    let proof6 = tree.prove(5).unwrap();
+    let proof3_4_6 = tree.prove_batch(&[3, 4, 5]).unwrap();
+    let result = proof3_4_6.into_paths(&[3, 4, 5]).unwrap();
 
-    for (i, path) in paths.iter().enumerate() {
-        assert_eq!(
-            path.len(),
-            depth + 1,
-            "Authentication path {} of incorrect size.",
-            i
-        );
-        assert!(
-            MerkleTree::<Blake3_256>::verify(tree.root().clone(), indexes[i], &path).is_ok(),
-            "Authentication path {} root does not match.",
-            i
-        );
-    }
+    assert_eq!(proof3, result[0]);
+    assert_eq!(proof4, result[1]);
+    assert_eq!(proof6, result[2]);
 }
 
 proptest! {
@@ -310,6 +292,24 @@ proptest! {
         let proof2 = BatchMerkleProof::from_paths(&paths, &indices);
 
         prop_assert!(proof1 == proof2);
+    }
+
+    #[test]
+    fn into_paths(tree in random_blake3_merkle_tree(32),
+                      proof_indices in prop::collection::vec(any::<prop::sample::Index>(), 1..30)
+    )  {
+        let mut indices: Vec<usize> = proof_indices.iter().map(|idx| idx.index(32)).collect();
+        indices.sort_unstable(); indices.dedup();
+        let proof1 = tree.prove_batch(&indices[..]).unwrap();
+
+        let mut paths_expected = Vec::new();
+        for &idx in indices.iter() {
+            paths_expected.push(tree.prove(idx).unwrap());
+        }
+
+        let paths = proof1.into_paths(&indices);
+
+        prop_assert!(paths_expected == paths.unwrap());
     }
 }
 

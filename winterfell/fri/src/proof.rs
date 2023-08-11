@@ -4,7 +4,7 @@
 // LICENSE file in the root directory of this source tree.
 
 use crypto::{BatchMerkleProof, ElementHasher, Hasher};
-use math::{log2, FieldElement};
+use math::FieldElement;
 use utils::{
     collections::Vec, string::ToString, ByteReader, ByteWriter, Deserializable,
     DeserializationError, Serializable, SliceReader,
@@ -20,10 +20,10 @@ use utils::{
 /// of a [FriProver](crate::FriProver), and can be verified by a instance of a
 /// [FriVerifier](crate::FriVerifier) via [VerifierChannel](crate::VerifierChannel) interface.
 ///
-/// A proof consists of zero or more layers and a remainder. Each layer contains a set of
+/// A proof consists of zero or more layers and a remainder polynomial. Each layer contains a set of
 /// polynomial evaluations at positions queried by the verifier as well as Merkle authentication
 /// paths for these evaluations (the Merkle paths are compressed into a batch Merkle proof). The
-/// remainder is a list of field elements.
+/// remainder polynomial is given by its list of coefficients i.e. field elements.
 ///
 /// All values in a proof are stored as vectors of bytes. Thus, the values must be parsed before
 /// they can be returned to the user. To do this, [parse_layers()](FriProof::parse_layers())
@@ -38,7 +38,7 @@ pub struct FriProof {
 impl FriProof {
     // CONSTRUCTOR
     // --------------------------------------------------------------------------------------------
-    /// Creates a new FRI proof from the provided layers and remainder values.
+    /// Creates a new FRI proof from the provided layers and remainder polynomial.
     ///
     /// # Panics
     /// Panics if:
@@ -64,8 +64,7 @@ impl FriProof {
         );
         assert!(
             num_partitions.is_power_of_two(),
-            "number of partitions must be a power of two, but was {}",
-            num_partitions
+            "number of partitions must be a power of two, but was {num_partitions}"
         );
         FriProof {
             layers,
@@ -140,27 +139,15 @@ impl FriProof {
 
         let mut layer_proofs = Vec::new();
         let mut layer_queries = Vec::new();
-        let num_remainder_elements = self.num_remainder_elements::<E>();
 
         // parse all layers
         for (i, layer) in self.layers.into_iter().enumerate() {
             domain_size /= folding_factor;
             let (qv, mp) = layer.parse(domain_size, folding_factor).map_err(|err| {
-                DeserializationError::InvalidValue(format!(
-                    "failed to parse FRI layer {}: {}",
-                    i, err
-                ))
+                DeserializationError::InvalidValue(format!("failed to parse FRI layer {i}: {err}"))
             })?;
             layer_proofs.push(mp);
             layer_queries.push(qv);
-        }
-
-        // make sure the remaining domain size matches remainder length
-        if domain_size != num_remainder_elements {
-            return Err(DeserializationError::InvalidValue(format!(
-                "FRI remainder domain size must be {}, but was {}",
-                num_remainder_elements, domain_size,
-            )));
         }
 
         Ok((layer_queries, layer_proofs))
@@ -178,13 +165,12 @@ impl FriProof {
         let num_elements = self.num_remainder_elements::<E>();
         if !num_elements.is_power_of_two() {
             return Err(DeserializationError::InvalidValue(format!(
-                "number of remainder values must be a power of two, but {} was implied",
-                num_elements
+                "number of remainder values must be a power of two, but {num_elements} was implied"
             )));
         }
         let mut reader = SliceReader::new(&self.remainder);
         let remainder = E::read_batch_from(&mut reader, num_elements).map_err(|err| {
-            DeserializationError::InvalidValue(format!("failed to parse FRI remainder: {}", err))
+            DeserializationError::InvalidValue(format!("failed to parse FRI remainder: {err}"))
         })?;
         if reader.has_more_bytes() {
             return Err(DeserializationError::UnconsumedBytes);
@@ -207,7 +193,7 @@ impl Serializable for FriProof {
 
         // write remainder
         target.write_u16(self.remainder.len() as u16);
-        target.write_u8_slice(&self.remainder);
+        target.write_bytes(&self.remainder);
 
         // write number of partitions
         target.write_u8(self.num_partitions);
@@ -226,7 +212,7 @@ impl Deserializable for FriProof {
 
         // read remainder
         let num_remainder_bytes = source.read_u16()? as usize;
-        let remainder = source.read_u8_vec(num_remainder_bytes)?;
+        let remainder = source.read_vec(num_remainder_bytes)?;
 
         // read number of partitions
         let num_partitions = source.read_u8()?;
@@ -333,7 +319,7 @@ impl FriProofLayer {
 
         // build batch Merkle proof
         let mut reader = SliceReader::new(&self.paths);
-        let tree_depth = log2(domain_size) as u8;
+        let tree_depth = domain_size.ilog2() as u8;
         let merkle_proof = BatchMerkleProof::deserialize(&mut reader, hashed_queries, tree_depth)?;
         if reader.has_more_bytes() {
             return Err(DeserializationError::UnconsumedBytes);
@@ -351,11 +337,11 @@ impl Serializable for FriProofLayer {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
         // write value bytes
         target.write_u32(self.values.len() as u32);
-        target.write_u8_slice(&self.values);
+        target.write_bytes(&self.values);
 
         // write path bytes
         target.write_u32(self.paths.len() as u32);
-        target.write_u8_slice(&self.paths);
+        target.write_bytes(&self.paths);
     }
 }
 
@@ -372,11 +358,11 @@ impl Deserializable for FriProofLayer {
                 "a FRI proof layer must contain at least one queried evaluation".to_string(),
             ));
         }
-        let values = source.read_u8_vec(num_value_bytes as usize)?;
+        let values = source.read_vec(num_value_bytes as usize)?;
 
         // read paths
         let num_paths_bytes = source.read_u32()?;
-        let paths = source.read_u8_vec(num_paths_bytes as usize)?;
+        let paths = source.read_vec(num_paths_bytes as usize)?;
 
         Ok(FriProofLayer { values, paths })
     }

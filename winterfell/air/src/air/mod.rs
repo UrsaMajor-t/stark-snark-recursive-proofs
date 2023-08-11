@@ -4,12 +4,9 @@
 // LICENSE file in the root directory of this source tree.
 
 use crate::ProofOptions;
-use crypto::{Hasher, RandomCoin, RandomCoinError};
-use math::{fft, ExtensibleField, ExtensionOf, FieldElement, StarkField};
-use utils::{
-    collections::{BTreeMap, Vec},
-    Serializable,
-};
+use crypto::{RandomCoin, RandomCoinError};
+use math::{fft, ExtensibleField, ExtensionOf, FieldElement, StarkField, ToElements};
+use utils::collections::{BTreeMap, Vec};
 
 mod trace_info;
 pub use trace_info::{TraceInfo, TraceLayout};
@@ -24,9 +21,7 @@ mod boundary;
 pub use boundary::{BoundaryConstraint, BoundaryConstraintGroup, BoundaryConstraints};
 
 mod transition;
-pub use transition::{
-    EvaluationFrame, TransitionConstraintDegree, TransitionConstraintGroup, TransitionConstraints,
-};
+pub use transition::{EvaluationFrame, TransitionConstraintDegree, TransitionConstraints};
 
 mod coefficients;
 pub use coefficients::{
@@ -35,6 +30,7 @@ pub use coefficients::{
 
 mod divisor;
 pub use divisor::ConstraintDivisor;
+use utils::Serializable;
 
 #[cfg(test)]
 mod tests;
@@ -184,8 +180,8 @@ pub trait Air: Send + Sync {
     type BaseField: StarkField + ExtensibleField<2> + ExtensibleField<3>;
 
     /// A type defining shape of public inputs for the computation described by this protocol.
-    /// This could be any type as long as it can be serialized into a sequence of bytes.
-    type PublicInputs: Serializable;
+    /// This could be any type as long as it can be serialized into a sequence of field elements.
+    type PublicInputs: ToElements<Self::BaseField>+Serializable;
 
     // REQUIRED METHODS
     // --------------------------------------------------------------------------------------------
@@ -318,14 +314,11 @@ pub trait Air: Send + Sync {
                 let cycle_length = column.len();
                 assert!(
                     cycle_length >= MIN_CYCLE_LENGTH,
-                    "number of values in a periodic column must be at least {}, but was {}",
-                    MIN_CYCLE_LENGTH,
-                    cycle_length
+                    "number of values in a periodic column must be at least {MIN_CYCLE_LENGTH}, but was {cycle_length}"
                 );
                 assert!(
                     cycle_length.is_power_of_two(),
-                    "number of values in a periodic column must be a power of two, but was {}",
-                    cycle_length
+                    "number of values in a periodic column must be a power of two, but was {cycle_length}"
                 );
                 assert!(cycle_length <= self.trace_length(),
                     "number of values in a periodic column cannot exceed trace length {}, but was {}",
@@ -351,7 +344,7 @@ pub trait Air: Send + Sync {
     /// function.
     fn get_transition_constraints<E: FieldElement<BaseField = Self::BaseField>>(
         &self,
-        composition_coefficients: &[(E, E)],
+        composition_coefficients: &[E],
     ) -> TransitionConstraints<E> {
         TransitionConstraints::new(self.context(), composition_coefficients)
     }
@@ -365,7 +358,7 @@ pub trait Air: Send + Sync {
     fn get_boundary_constraints<E: FieldElement<BaseField = Self::BaseField>>(
         &self,
         aux_rand_elements: &AuxTraceRandElements<E>,
-        composition_coefficients: &[(E, E)],
+        composition_coefficients: &[E],
     ) -> BoundaryConstraints<E> {
         BoundaryConstraints::new(
             self.context(),
@@ -439,14 +432,6 @@ pub trait Air: Send + Sync {
         self.context().ce_domain_size()
     }
 
-    /// Returns the degree to which all constraint polynomials are normalized before they are
-    /// composed together.
-    ///
-    /// This degree is one less than the size of constraint evaluation domain.
-    fn composition_degree(&self) -> usize {
-        self.context().composition_degree()
-    }
-
     /// Returns low-degree extension domain blowup factor for the computation described by this
     /// AIR. This is guaranteed to be a power of two, and is always either equal to or greater
     /// than ce_blowup_factor.
@@ -483,14 +468,14 @@ pub trait Air: Send + Sync {
     /// with the specified index.
     ///
     /// The elements are drawn uniformly at random from the provided public coin.
-    fn get_aux_trace_segment_random_elements<E, H>(
+    fn get_aux_trace_segment_random_elements<E, R>(
         &self,
         aux_segment_idx: usize,
-        public_coin: &mut RandomCoin<Self::BaseField, H>,
+        public_coin: &mut R,
     ) -> Result<Vec<E>, RandomCoinError>
     where
         E: FieldElement<BaseField = Self::BaseField>,
-        H: Hasher,
+        R: RandomCoin<BaseField = Self::BaseField>,
     {
         let num_elements = self
             .trace_info()
@@ -508,22 +493,22 @@ pub trait Air: Send + Sync {
 
     /// Returns coefficients needed for random linear combination during construction of constraint
     /// composition polynomial.
-    fn get_constraint_composition_coefficients<E, H>(
+    fn get_constraint_composition_coefficients<E, R>(
         &self,
-        public_coin: &mut RandomCoin<Self::BaseField, H>,
+        public_coin: &mut R,
     ) -> Result<ConstraintCompositionCoefficients<E>, RandomCoinError>
     where
         E: FieldElement<BaseField = Self::BaseField>,
-        H: Hasher,
+        R: RandomCoin<BaseField = Self::BaseField>,
     {
         let mut t_coefficients = Vec::new();
         for _ in 0..self.context().num_transition_constraints() {
-            t_coefficients.push(public_coin.draw_pair()?);
+            t_coefficients.push(public_coin.draw()?);
         }
 
         let mut b_coefficients = Vec::new();
         for _ in 0..self.context().num_assertions() {
-            b_coefficients.push(public_coin.draw_pair()?);
+            b_coefficients.push(public_coin.draw()?);
         }
 
         Ok(ConstraintCompositionCoefficients {
@@ -534,29 +519,27 @@ pub trait Air: Send + Sync {
 
     /// Returns coefficients needed for random linear combinations during construction of DEEP
     /// composition polynomial.
-    fn get_deep_composition_coefficients<E, H>(
+    fn get_deep_composition_coefficients<E, R>(
         &self,
-        public_coin: &mut RandomCoin<Self::BaseField, H>,
+        public_coin: &mut R,
     ) -> Result<DeepCompositionCoefficients<E>, RandomCoinError>
     where
         E: FieldElement<BaseField = Self::BaseField>,
-        H: Hasher,
+        R: RandomCoin<BaseField = Self::BaseField>,
     {
         let mut t_coefficients = Vec::new();
         for _ in 0..self.trace_info().width() {
-            t_coefficients.push(public_coin.draw_triple()?);
+            t_coefficients.push(public_coin.draw()?);
         }
 
-        // self.ce_blowup_factor() is the same as number of composition columns
         let mut c_coefficients = Vec::new();
-        for _ in 0..self.ce_blowup_factor() {
+        for _ in 0..self.context().num_constraint_composition_columns() {
             c_coefficients.push(public_coin.draw()?);
         }
 
         Ok(DeepCompositionCoefficients {
             trace: t_coefficients,
             constraints: c_coefficients,
-            degree: public_coin.draw_pair()?,
         })
     }
 }

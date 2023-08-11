@@ -57,7 +57,7 @@ impl<E: FieldElement> BoundaryConstraints<E> {
         context: &AirContext<E::BaseField>,
         main_assertions: Vec<Assertion<E::BaseField>>,
         aux_assertions: Vec<Assertion<E>>,
-        composition_coefficients: &[(E, E)],
+        composition_coefficients: &[E],
     ) -> Self {
         // make sure the provided assertions are consistent with the specified context
         assert_eq!(
@@ -152,7 +152,7 @@ impl<E: FieldElement> BoundaryConstraints<E> {
 fn group_constraints<F, E>(
     assertions: Vec<Assertion<F>>,
     context: &AirContext<F::BaseField>,
-    composition_coefficients: &[(E, E)],
+    composition_coefficients: &[E],
     inv_g: F::BaseField,
     twiddle_map: &mut BTreeMap<usize, Vec<F::BaseField>>,
 ) -> Vec<BoundaryConstraintGroup<F, E>>
@@ -166,22 +166,18 @@ where
     for (assertion, &cc) in assertions.into_iter().zip(composition_coefficients) {
         let key = (assertion.stride(), assertion.first_step());
         let group = groups.entry(key).or_insert_with(|| {
-            BoundaryConstraintGroup::new(
-                ConstraintDivisor::from_assertion(&assertion, context.trace_len()),
-                context.trace_poly_degree(),
-                context.composition_degree(),
-            )
+            BoundaryConstraintGroup::new(ConstraintDivisor::from_assertion(
+                &assertion,
+                context.trace_len(),
+            ))
         });
 
         // add a new assertion constraint to the current group (last group in the list)
         group.add(assertion, inv_g, twiddle_map, cc);
     }
 
-    // make sure groups are sorted by adjustment degree
-    let mut groups = groups.into_iter().map(|e| e.1).collect::<Vec<_>>();
-    groups.sort_by_key(|c| c.degree_adjustment());
-
-    groups
+    //return a vector of groups
+    groups.into_iter().map(|e| e.1).collect::<Vec<_>>()
 }
 
 /// Makes sure the assertions are valid in the context of this computation and don't overlap with
@@ -201,19 +197,17 @@ fn prepare_assertions<E: FieldElement>(
         assertion
             .validate_trace_width(trace_width)
             .unwrap_or_else(|err| {
-                panic!("assertion {} is invalid: {}", assertion, err);
+                panic!("assertion {assertion} is invalid: {err}");
             });
         assertion
             .validate_trace_length(trace_length)
             .unwrap_or_else(|err| {
-                panic!("assertion {} is invalid: {}", assertion, err);
+                panic!("assertion {assertion} is invalid: {err}");
             });
         for a in result.iter().filter(|a| a.column == assertion.column) {
             assert!(
                 !a.overlaps_with(&assertion),
-                "assertion {} overlaps with assertion {}",
-                assertion,
-                a
+                "assertion {assertion} overlaps with assertion {a}"
             );
         }
 

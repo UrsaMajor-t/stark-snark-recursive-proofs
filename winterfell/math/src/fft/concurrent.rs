@@ -3,10 +3,8 @@
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the root directory of this source tree.
 
-use crate::{
-    field::{FieldElement, StarkField},
-    utils::log2,
-};
+use super::fft_inputs::FftInputs;
+use crate::field::{FieldElement, StarkField};
 use utils::{collections::Vec, iterators::*, rayon, uninit_vector};
 
 // POLYNOMIAL EVALUATION
@@ -29,7 +27,7 @@ pub fn evaluate_poly_with_offset<B: StarkField, E: FieldElement<BaseField = B>>(
     blowup_factor: usize,
 ) -> Vec<E> {
     let domain_size = p.len() * blowup_factor;
-    let g = B::get_root_of_unity(log2(domain_size));
+    let g = B::get_root_of_unity(domain_size.ilog2());
     let mut result = unsafe { uninit_vector(domain_size) };
 
     result
@@ -129,7 +127,7 @@ pub(super) fn split_radix_fft<B: StarkField, E: FieldElement<BaseField = B>>(
     let g = twiddles[twiddles.len() / 2];
     debug_assert_eq!(g.exp((n as u32).into()), E::BaseField::ONE);
 
-    let inner_len = 1_usize << (log2(n) / 2);
+    let inner_len = 1_usize << (n.ilog2() / 2);
     let outer_len = n / inner_len;
     let stretch = outer_len / inner_len;
     debug_assert!(outer_len == inner_len || outer_len == 2 * inner_len);
@@ -141,7 +139,7 @@ pub(super) fn split_radix_fft<B: StarkField, E: FieldElement<BaseField = B>>(
     // apply inner FFTs
     values
         .par_chunks_mut(outer_len)
-        .for_each(|row| super::serial::fft_in_place(row, &twiddles, stretch, stretch, 0));
+        .for_each(|row| row.fft_in_place_raw(&twiddles, stretch, stretch, 0));
 
     // transpose inner x inner x stretch square matrix
     transpose_square_stretch(values, inner_len, stretch);
@@ -160,7 +158,7 @@ pub(super) fn split_radix_fft<B: StarkField, E: FieldElement<BaseField = B>>(
                     outer_twiddle = outer_twiddle * inner_twiddle;
                 }
             }
-            super::serial::fft_in_place(row, &twiddles, 1, 1, 0)
+            row.fft_in_place(&twiddles);
         });
 }
 

@@ -22,6 +22,8 @@ pub struct Blake3_256<B: StarkField>(PhantomData<B>);
 impl<B: StarkField> Hasher for Blake3_256<B> {
     type Digest = ByteDigest<32>;
 
+    const COLLISION_RESISTANCE: u32 = 128;
+
     fn hash(bytes: &[u8]) -> Self::Digest {
         ByteDigest(*blake3::hash(bytes).as_bytes())
     }
@@ -67,6 +69,8 @@ pub struct Blake3_192<B: StarkField>(PhantomData<B>);
 
 impl<B: StarkField> Hasher for Blake3_192<B> {
     type Digest = ByteDigest<24>;
+
+    const COLLISION_RESISTANCE: u32 = 96;
 
     fn hash(bytes: &[u8]) -> Self::Digest {
         let result = blake3::hash(bytes);
@@ -130,7 +134,7 @@ impl ByteWriter for BlakeHasher {
         self.0.update(&[value]);
     }
 
-    fn write_u8_slice(&mut self, values: &[u8]) {
+    fn write_bytes(&mut self, values: &[u8]) {
         self.0.update(values);
     }
 }

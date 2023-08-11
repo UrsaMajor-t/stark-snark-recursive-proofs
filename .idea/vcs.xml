@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="VcsDirectoryMappings">
+    <mapping directory="" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/language/circom" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/language/rapidsnark" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/language/rapidsnark/depends/circom_runtime" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/language/rapidsnark/depends/ffiasm" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/language/rapidsnark/depends/json" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/language/rapidsnark/depends/pistache" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/language/snarkjs" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/winterfell" vcs="Git" />
+  </component>
+</project>

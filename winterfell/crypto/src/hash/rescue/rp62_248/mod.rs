@@ -16,7 +16,7 @@ mod tests;
 // CONSTANTS
 // ================================================================================================
 
-/// Sponge state is set to 12 field elements or 744 bytes; 8 elements are reserved for rate and
+/// Sponge state is set to 12 field elements or 93 bytes; 8 elements are reserved for rate and
 /// the remaining 4 elements are reserved for capacity.
 const STATE_WIDTH: usize = 12;
 const RATE_WIDTH: usize = 8;
@@ -91,6 +91,8 @@ pub struct Rp62_248();
 
 impl Hasher for Rp62_248 {
     type Digest = ElementDigest;
+
+    const COLLISION_RESISTANCE: u32 = 124;
 
     fn hash(bytes: &[u8]) -> Self::Digest {
         // compute the number of elements required to represent the string; we will be processing
@@ -192,7 +194,7 @@ impl ElementHasher for Rp62_248 {
 
     fn hash_elements<E: FieldElement<BaseField = Self::BaseField>>(elements: &[E]) -> Self::Digest {
         // convert the elements into a list of base field elements
-        let elements = E::as_base_elements(elements);
+        let elements = E::slice_as_base_elements(elements);
 
         // initialize state to all zeros, except for the last element of the capacity part, which
         // is set to the number of elements to be hashed. this is done so that adding zero elements

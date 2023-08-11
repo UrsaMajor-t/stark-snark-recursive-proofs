@@ -10,8 +10,8 @@ use air::{
 use core::marker::PhantomData;
 use crypto::{ElementHasher, RandomCoin};
 use fri::{self, FriProof};
-use math::FieldElement;
-use utils::{collections::Vec, Serializable};
+use math::{FieldElement, ToElements};
+use utils::collections::Vec;
 
 #[cfg(feature = "concurrent")]
 use utils::iterators::*;
@@ -19,14 +19,15 @@ use utils::iterators::*;
 // TYPES AND INTERFACES
 // ================================================================================================
 
-pub struct ProverChannel<'a, A, E, H>
+pub struct ProverChannel<'a, A, E, H, R>
 where
     A: Air,
     E: FieldElement<BaseField = A::BaseField>,
     H: ElementHasher<BaseField = A::BaseField>,
+    R: RandomCoin<BaseField = E::BaseField, Hasher = H>,
 {
     air: &'a A,
-    public_coin: RandomCoin<A::BaseField, H>,
+    public_coin: R,
     context: Context,
     commitments: Commitments,
     ood_frame: OodFrame,
@@ -37,27 +38,28 @@ where
 // PROVER CHANNEL IMPLEMENTATION
 // ================================================================================================
 
-impl<'a, A, E, H> ProverChannel<'a, A, E, H>
+impl<'a, A, E, H, R> ProverChannel<'a, A, E, H, R>
 where
     A: Air,
     E: FieldElement<BaseField = A::BaseField>,
     H: ElementHasher<BaseField = A::BaseField>,
+    R: RandomCoin<BaseField = A::BaseField, Hasher = H>,
 {
     // CONSTRUCTOR
     // --------------------------------------------------------------------------------------------
     /// Creates a new prover channel for the specified `air` and public inputs.
-    pub fn new(air: &'a A, pub_inputs_bytes: Vec<u8>) -> Self {
+    pub fn new(air: &'a A, mut pub_inputs_elements: Vec<A::BaseField>) -> Self {
         let context = Context::new::<A::BaseField>(air.trace_info(), air.options().clone());
 
-        // build a seed for the public coin; the initial seed is the hash of public inputs and proof
-        // context, but as the protocol progresses, the coin will be reseeded with the info sent to
-        // the verifier
-        let mut coin_seed = pub_inputs_bytes;
-        context.write_into(&mut coin_seed);
+        // build a seed for the public coin; the initial seed is a hash of the proof context and
+        // the public inputs, but as the protocol progresses, the coin will be reseeded with the
+        // info sent to the verifier
+        let mut coin_seed_elements = context.to_elements();
+        coin_seed_elements.append(&mut pub_inputs_elements);
 
         ProverChannel {
             air,
-            public_coin: RandomCoin::new(&coin_seed),
+            public_coin: RandomCoin::new(&coin_seed_elements),
             context,
             commitments: Commitments::default(),
             ood_frame: OodFrame::default(),
@@ -84,10 +86,8 @@ where
     /// Saves the evaluations of trace polynomials over the out-of-domain evaluation frame. This
     /// also reseeds the public coin with the hashes of the evaluation frame states.
     pub fn send_ood_trace_states(&mut self, trace_states: &[Vec<E>]) {
-        self.ood_frame.set_trace_states(trace_states);
-        for trace_state in trace_states {
-            self.public_coin.reseed(H::hash_elements(trace_state));
-        }
+        let result = self.ood_frame.set_trace_states(trace_states);
+        self.public_coin.reseed(H::hash_elements(&result));
     }
 
     /// Saves the evaluations of constraint composition polynomial columns at the out-of-domain
@@ -191,11 +191,12 @@ where
 // FRI PROVER CHANNEL IMPLEMENTATION
 // ================================================================================================
 
-impl<'a, A, E, H> fri::ProverChannel<E> for ProverChannel<'a, A, E, H>
+impl<'a, A, E, H, R> fri::ProverChannel<E> for ProverChannel<'a, A, E, H, R>
 where
     A: Air,
     E: FieldElement<BaseField = A::BaseField>,
     H: ElementHasher<BaseField = A::BaseField>,
+    R: RandomCoin<BaseField = A::BaseField, Hasher = H>,
 {
     type Hasher = H;
 

@@ -19,6 +19,7 @@ pub struct Poseidon<B: StarkField>(PhantomData<B>);
 
 impl<B:StarkField> Hasher for Poseidon<B> {
     type Digest = ByteDigest<32>;
+    const COLLISION_RESISTANCE: u32 = 256;
 
     fn hash(bytes: &[u8]) -> Self::Digest {
         // return the first [RATE] elements of the state as hash result

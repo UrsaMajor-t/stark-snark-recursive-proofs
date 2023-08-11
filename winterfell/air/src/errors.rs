@@ -8,7 +8,7 @@ use core::fmt;
 // ASSERTION ERROR
 // ================================================================================================
 /// Represents an error returned during assertion evaluation.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum AssertionError {
     /// This error occurs when an assertion is evaluated against an execution trace which does not
     /// contain a column specified by the assertion.
@@ -29,16 +29,16 @@ impl fmt::Display for AssertionError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::TraceWidthTooShort(expected, actual) => {
-                write!(f, "expected trace width to be at least {}, but was {}", expected, actual)
+                write!(f, "expected trace width to be at least {expected}, but was {actual}")
             }
             Self::TraceLengthNotPowerOfTwo(actual) => {
-                write!(f, "expected trace length to be a power of two, but was {}", actual)
+                write!(f, "expected trace length to be a power of two, but was {actual}")
             }
             Self::TraceLengthTooShort(expected, actual) => {
-                write!(f, "expected trace length to be at least {}, but was {}", expected, actual)
+                write!(f, "expected trace length to be at least {expected}, but was {actual}")
             }
             Self::TraceLengthNotExact(expected, actual) => {
-                write!(f, "expected trace length to be exactly {}, but was {}", expected, actual)
+                write!(f, "expected trace length to be exactly {expected}, but was {actual}")
             }
         }
     }

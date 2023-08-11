@@ -149,9 +149,9 @@
 //!
 //! ```no_run
 //! use winterfell::{
-//!     math::{fields::f128::BaseElement, FieldElement},
-//!     Air, AirContext, Assertion, ByteWriter, EvaluationFrame, ProofOptions, Serializable,
-//!     TraceInfo, TransitionConstraintDegree,
+//!     math::{fields::f128::BaseElement, FieldElement, ToElements},
+//!     Air, AirContext, Assertion, ByteWriter, EvaluationFrame, ProofOptions, TraceInfo,
+//!     TransitionConstraintDegree, crypto::{hashers::Blake3_256, DefaultRandomCoin},
 //! };
 //!
 //! // Public inputs for our computation will consist of the starting value and the end result.
@@ -160,11 +160,10 @@
 //!     result: BaseElement,
 //! }
 //!
-//! // We need to describe how public inputs can be converted to bytes.
-//! impl Serializable for PublicInputs {
-//!     fn write_into<W: ByteWriter>(&self, target: &mut W) {
-//!         target.write(self.start);
-//!         target.write(self.result);
+//! // We need to describe how public inputs can be converted to field elements.
+//! impl ToElements<BaseElement> for PublicInputs {
+//!     fn to_elements(&self) -> Vec<BaseElement> {
+//!         vec![self.start, self.result]
 //!     }
 //! }
 //!
@@ -256,13 +255,14 @@
 //!
 //! ```no_run
 //! use winterfell::{
-//!     math::{fields::f128::BaseElement, FieldElement},
-//!     ProofOptions, Prover, Trace, TraceTable
+//!     crypto::{hashers::Blake3_256, DefaultRandomCoin},
+//!     math::{fields::f128::BaseElement, FieldElement, ToElements},
+//!     DefaultTraceLde, ProofOptions, Prover, Trace, TraceTable,
 //! };
 //!
 //! # use winterfell::{
-//! #   Air, AirContext, Assertion, ByteWriter, EvaluationFrame, Serializable,
-//! #   TraceInfo, TransitionConstraintDegree,
+//! #   Air, AirContext, Assertion, ByteWriter, EvaluationFrame, TraceInfo,
+//! #   TransitionConstraintDegree,
 //! # };
 //! #
 //! # pub struct PublicInputs {
@@ -270,10 +270,9 @@
 //! #     result: BaseElement,
 //! # }
 //! #
-//! # impl Serializable for PublicInputs {
-//! #     fn write_into<W: ByteWriter>(&self, target: &mut W) {
-//! #         target.write(self.start);
-//! #         target.write(self.result);
+//! # impl ToElements<BaseElement> for PublicInputs {
+//! #     fn to_elements(&self) -> Vec<BaseElement> {
+//! #         vec![self.start, self.result]
 //! #     }
 //! # }
 //! #
@@ -340,6 +339,9 @@
 //!     type BaseField = BaseElement;
 //!     type Air = WorkAir;
 //!     type Trace = TraceTable<Self::BaseField>;
+//!     type HashFn = Blake3_256<Self::BaseField>;
+//!     type RandomCoin = DefaultRandomCoin<Self::HashFn>;
+//!     type TraceLde<E: FieldElement<BaseField = Self::BaseField>> = DefaultTraceLde<E, Self::HashFn>;
 //!
 //!     // Our public inputs consist of the first and last value in the execution trace.
 //!     fn get_pub_inputs(&self, trace: &Self::Trace) -> PublicInputs {
@@ -365,10 +367,10 @@
 //!
 //! ```
 //! # use winterfell::{
-//! #    math::{fields::f128::BaseElement, FieldElement},
-//! #    Air, AirContext, Assertion, ByteWriter, EvaluationFrame, Serializable,
-//! #    TraceInfo, TransitionConstraintDegree, TraceTable, FieldExtension,
-//! #    HashFunction, Prover, ProofOptions, StarkProof, Trace,
+//! #    math::{fields::f128::BaseElement, FieldElement, ToElements},
+//! #    Air, AirContext, Assertion, ByteWriter, DefaultTraceLde, EvaluationFrame, TraceInfo,
+//! #    TransitionConstraintDegree, TraceTable, FieldExtension, Prover, ProofOptions,
+//! #    StarkProof, Trace, crypto::{hashers::Blake3_256, DefaultRandomCoin},
 //! # };
 //! #
 //! # pub fn build_do_work_trace(start: BaseElement, n: usize) -> TraceTable<BaseElement> {
@@ -391,10 +393,9 @@
 //! #     result: BaseElement,
 //! # }
 //! #
-//! # impl Serializable for PublicInputs {
-//! #     fn write_into<W: ByteWriter>(&self, target: &mut W) {
-//! #         target.write(self.start);
-//! #         target.write(self.result);
+//! # impl ToElements<BaseElement> for PublicInputs {
+//! #     fn to_elements(&self) -> Vec<BaseElement> {
+//! #         vec![self.start, self.result]
 //! #     }
 //! # }
 //! #
@@ -456,6 +457,9 @@
 //! #    type BaseField = BaseElement;
 //! #    type Air = WorkAir;
 //! #    type Trace = TraceTable<Self::BaseField>;
+//! #    type HashFn = Blake3_256<Self::BaseField>;
+//! #    type RandomCoin = DefaultRandomCoin<Self::HashFn>;
+//! #    type TraceLde<E: FieldElement<BaseField = Self::BaseField>> = DefaultTraceLde<E, Self::HashFn>;
 //! #
 //! #    fn get_pub_inputs(&self, trace: &Self::Trace) -> PublicInputs {
 //! #        let last_step = trace.length() - 1;
@@ -484,10 +488,9 @@
 //!     32, // number of queries
 //!     8,  // blowup factor
 //!     0,  // grinding factor
-//!     HashFunction::Blake3_256,
 //!     FieldExtension::None,
-//!     8,   // FRI folding factor
-//!     128, // FRI max remainder length
+//!     8,  // FRI folding factor
+//!     31, // FRI max remainder polynomial degree
 //! );
 //!
 //! // Instantiate the prover and generate the proof.
@@ -497,7 +500,10 @@
 //! // Verify the proof. The number of steps and options are encoded in the proof itself,
 //! // so we don't need to pass them explicitly to the verifier.
 //! let pub_inputs = PublicInputs { start, result };
-//! assert!(winterfell::verify::<WorkAir>(proof, pub_inputs).is_ok());
+//! assert!(winterfell::verify::<WorkAir,
+//!                              Blake3_256<BaseElement>,
+//!                              DefaultRandomCoin<Blake3_256<BaseElement>>
+//!                             >(proof, pub_inputs).is_ok());
 //! ```
 //!
 //! That's all there is to it!
@@ -527,10 +533,10 @@
 
 pub use prover::{
     crypto, iterators, math, Air, AirContext, Assertion, AuxTraceRandElements, BoundaryConstraint,
-    BoundaryConstraintGroup, ByteReader, ByteWriter, ConstraintCompositionCoefficients,
-    ConstraintDivisor, DeepCompositionCoefficients, Deserializable, DeserializationError,
-    EvaluationFrame, FieldExtension, HashFunction, Matrix, ProofOptions, Prover, ProverError,
-    Serializable, SliceReader, StarkProof, Trace, TraceInfo, TraceLayout, TraceTable,
-    TraceTableFragment, TransitionConstraintDegree, TransitionConstraintGroup,
+    BoundaryConstraintGroup, ByteReader, ByteWriter, ColMatrix, ConstraintCompositionCoefficients,
+    ConstraintDivisor, DeepCompositionCoefficients, DefaultTraceLde, Deserializable,
+    DeserializationError, EvaluationFrame, FieldExtension, ProofOptions, Prover, ProverError,
+    Serializable, SliceReader, StarkProof,StarkDomain, Trace, TraceInfo, TraceLayout, TraceLde, TraceTable,
+    TraceTableFragment, TransitionConstraintDegree,
 };
-pub use verifier::{verify, VerifierError};
+pub use verifier::{verify, VerifierError,ConstraintQueries};

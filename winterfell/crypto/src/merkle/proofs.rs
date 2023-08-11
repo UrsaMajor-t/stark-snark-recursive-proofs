@@ -5,7 +5,7 @@
 
 use crate::{errors::MerkleTreeError, Hasher};
 use utils::{
-    collections::{BTreeMap, BTreeSet, Vec},
+    collections::{BTreeMap, Vec},
     string::ToString,
     ByteReader, Deserializable, DeserializationError, Serializable,
 };
@@ -29,9 +29,12 @@ pub(super) const MAX_PATHS: usize = 255;
 /// imposed primarily for serialization purposes.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BatchMerkleProof<H: Hasher> {
-    pub(super) leaves: Vec<H::Digest>,
-    pub(super) nodes: Vec<Vec<H::Digest>>,
-    pub(super) depth: u8,
+    /// The leaves being proven
+    pub leaves: Vec<H::Digest>,
+    /// Hashes of Merkle Tree proof values above the leaf layer
+    pub nodes: Vec<Vec<H::Digest>>,
+    /// Depth of the leaves
+    pub depth: u8,
 }
 
 impl<H: Hasher> BatchMerkleProof<H> {
@@ -48,8 +51,7 @@ impl<H: Hasher> BatchMerkleProof<H> {
         assert!(!paths.is_empty(), "at least one path must be provided");
         assert!(
             paths.len() <= MAX_PATHS,
-            "number of paths cannot exceed {}",
-            MAX_PATHS
+            "number of paths cannot exceed {MAX_PATHS}"
         );
         assert_eq!(
             paths.len(),
@@ -255,7 +257,14 @@ impl<H: Hasher> BatchMerkleProof<H> {
         v.remove(&1).ok_or(MerkleTreeError::InvalidProof)
     }
 
-    pub fn to_paths(&self, indexes: &[usize]) -> Result<Vec<Vec<H::Digest>>, MerkleTreeError> {
+    /// Computes the uncompressed Merkle paths which aggregate to this proof.
+    ///
+    /// # Errors
+    /// Returns an error if:
+    /// * No indexes were provided (i.e., `indexes` is an empty slice).
+    /// * Number of provided indexes is greater than 255.
+    /// * Number of provided indexes does not match the number of leaf nodes in the proof.
+    pub fn into_paths(&self, indexes: &[usize]) -> Result<Vec<Vec<H::Digest>>, MerkleTreeError> {
         if indexes.is_empty() {
             return Err(MerkleTreeError::TooFewLeafIndexes);
         }
@@ -265,107 +274,138 @@ impl<H: Hasher> BatchMerkleProof<H> {
                 indexes.len(),
             ));
         }
-
-        // create un-initialized array to hold all intermediate nodes
-        let n = 2usize.pow(self.depth as u32);
-        let mut leaves = unsafe { utils::uninit_vector::<H::Digest>(n) };
-        let mut nodes = unsafe { utils::uninit_vector::<H::Digest>(n) };
-        nodes[0] = H::Digest::default();
-
-        // reinterpret leaves and nodes as an array of two leaves fused together
-        let two_leaves =
-            unsafe { std::slice::from_raw_parts(leaves.as_ptr() as *const [H::Digest; 2], n >> 1) };
-        let two_nodes =
-            unsafe { std::slice::from_raw_parts(nodes.as_ptr() as *const [H::Digest; 2], n >> 1) };
-
-        // sort indexes in ascending order
-        let original_indexes = indexes;
-        let index_map = super::map_indexes(indexes, self.depth as usize)?;
-        let indexes = index_map.keys().cloned().collect::<Vec<_>>();
-
-        // populate the leaves and the first layer of nodes
-        let mut i = 0;
-        let mut j = 0;
-        let mut nodes_indexes: Vec<usize> = Vec::with_capacity(indexes.len());
-        let mut next_index_map = BTreeSet::new();
-        while i < indexes.len() {
-            let index = indexes[i];
-            leaves[index] = if let Some(idx) = index_map.get(&index) {
-                self.leaves[*idx]
-            } else {
-                return Err(MerkleTreeError::InvalidProof);
-            };
-            if indexes.len() > i + 1 && are_siblings(index, indexes[i + 1]) {
-                leaves[indexes[i + 1]] = if let Some(idx) = index_map.get(&indexes[i + 1]) {
-                    self.leaves[*idx]
-                } else {
-                    return Err(MerkleTreeError::InvalidProof);
-                };
-                nodes_indexes.push(0);
-                i += 1;
-            } else {
-                leaves[index ^ 1] = self.nodes[j][0];
-                nodes_indexes.push(1);
-            }
-            nodes[(index + n) >> 1] = H::merge(&two_leaves[index >> 1]);
-            next_index_map.insert((index + n) >> 1);
-            i += 1;
-            j += 1;
-        }
-
-        // populate the remaining layers of nodes. after this loop,
-        // the leaves and the nodes will contain all the required nodes
-        // to build the required authentication paths
-        for _ in 1..self.depth {
-            let indexes = next_index_map.iter().cloned().collect::<Vec<_>>();
-            next_index_map.clear();
-
-            let mut i = 0;
-            while i < indexes.len() {
-                let index = indexes[i];
-                if indexes.len() > i + 1 && are_siblings(index, indexes[i + 1]) {
-                    i += 1;
-                } else {
-                    nodes[index ^ 1] = self.nodes[i][nodes_indexes[i]];
-                    nodes_indexes[i] += 1;
-                }
-                let index = index >> 1;
-                nodes[index] = H::merge(&&two_nodes[index]);
-                next_index_map.insert(index);
-                i += 1;
-            }
-        }
-
-        // the only remaining node should be the root
-        if next_index_map.len() > 1 || !next_index_map.contains(&1) {
+        if indexes.len() != self.leaves.len() {
             return Err(MerkleTreeError::InvalidProof);
         }
 
-        // build and return authentication paths
+        let mut partial_tree_map = BTreeMap::new();
+
+        for (&i, leaf) in indexes.iter().zip(self.leaves.iter()) {
+            partial_tree_map.insert(i + (1 << (self.depth)), *leaf);
+        }
+
+        let mut buf = [H::Digest::default(); 2];
+        let mut v = BTreeMap::new();
+
+        // replace odd indexes, offset, and sort in ascending order
+        let original_indexes = indexes;
+        let index_map = super::map_indexes(indexes, self.depth as usize)?;
+        let indexes = super::normalize_indexes(indexes);
+        if indexes.len() != self.nodes.len() {
+            return Err(MerkleTreeError::InvalidProof);
+        }
+
+        // for each index use values to compute parent nodes
+        let offset = 2usize.pow(self.depth as u32);
+        let mut next_indexes: Vec<usize> = Vec::new();
+        let mut proof_pointers: Vec<usize> = Vec::with_capacity(indexes.len());
+        for (i, index) in indexes.into_iter().enumerate() {
+            // copy values of leaf sibling leaf nodes into the buffer
+            match index_map.get(&index) {
+                Some(&index1) => {
+                    if self.leaves.len() <= index1 {
+                        return Err(MerkleTreeError::InvalidProof);
+                    }
+                    buf[0] = self.leaves[index1];
+                    match index_map.get(&(index + 1)) {
+                        Some(&index2) => {
+                            if self.leaves.len() <= index2 {
+                                return Err(MerkleTreeError::InvalidProof);
+                            }
+                            buf[1] = self.leaves[index2];
+                            proof_pointers.push(0);
+                        }
+                        None => {
+                            if self.nodes[i].is_empty() {
+                                return Err(MerkleTreeError::InvalidProof);
+                            }
+                            buf[1] = self.nodes[i][0];
+                            proof_pointers.push(1);
+                        }
+                    }
+                }
+                None => {
+                    if self.nodes[i].is_empty() {
+                        return Err(MerkleTreeError::InvalidProof);
+                    }
+                    buf[0] = self.nodes[i][0];
+                    match index_map.get(&(index + 1)) {
+                        Some(&index2) => {
+                            if self.leaves.len() <= index2 {
+                                return Err(MerkleTreeError::InvalidProof);
+                            }
+                            buf[1] = self.leaves[index2];
+                        }
+                        None => return Err(MerkleTreeError::InvalidProof),
+                    }
+                    proof_pointers.push(1);
+                }
+            }
+
+            // hash sibling nodes into their parent and add it to partial_tree
+            let parent = H::merge(&buf);
+            partial_tree_map.insert(offset + index, buf[0]);
+            partial_tree_map.insert((offset + index) ^ 1, buf[1]);
+            let parent_index = (offset + index) >> 1;
+            v.insert(parent_index, parent);
+            next_indexes.push(parent_index);
+            partial_tree_map.insert(parent_index, parent);
+        }
+
+        // iteratively move up, until we get to the root
+        for _ in 1..self.depth {
+            let indexes = next_indexes.clone();
+            next_indexes.clear();
+
+            let mut i = 0;
+            while i < indexes.len() {
+                let node_index = indexes[i];
+                let sibling_index = node_index ^ 1;
+
+                // determine the sibling
+                let sibling = if i + 1 < indexes.len() && indexes[i + 1] == sibling_index {
+                    i += 1;
+                    match v.get(&sibling_index) {
+                        Some(sibling) => *sibling,
+                        None => return Err(MerkleTreeError::InvalidProof),
+                    }
+                } else {
+                    let pointer = proof_pointers[i];
+                    if self.nodes[i].len() <= pointer {
+                        return Err(MerkleTreeError::InvalidProof);
+                    }
+                    proof_pointers[i] += 1;
+                    self.nodes[i][pointer]
+                };
+
+                // get the node from the map of hashed nodes
+                let node = match v.get(&node_index) {
+                    Some(node) => node,
+                    None => return Err(MerkleTreeError::InvalidProof),
+                };
+
+                // compute parent node from node and sibling
+                partial_tree_map.insert(node_index ^ 1, sibling);
+                let parent = if node_index & 1 != 0 {
+                    H::merge(&[sibling, *node])
+                } else {
+                    H::merge(&[*node, sibling])
+                };
+
+                // add the parent node to the next set of nodes and partial_tree
+                let parent_index = node_index >> 1;
+                v.insert(parent_index, parent);
+                next_indexes.push(parent_index);
+                partial_tree_map.insert(parent_index, parent);
+
+                i += 1;
+            }
+        }
+
         original_indexes
             .iter()
-            .cloned()
-            .map(|mut index| {
-                let mut path: Vec<H::Digest> = Vec::with_capacity(self.depth as usize + 1);
-
-                // add sibling leaf
-                path.push(leaves[index ^ 1]);
-                index = (index + n) >> 1;
-
-                // add nodes
-                for _ in 1..self.depth {
-                    path.push(nodes[index ^ 1]);
-                    index >>= 1;
-                }
-
-                if index != 1 {
-                    // index must be root
-                    return Err(MerkleTreeError::InvalidProof);
-                }
-
-                Ok(path)
-            })
-            .collect::<Result<Vec<Vec<_>>, MerkleTreeError>>()
+            .map(|&i| get_path::<H>(i, &partial_tree_map, self.depth as usize))
+            .collect()
     }
 
     // SERIALIZATION / DESERIALIZATION
@@ -455,4 +495,32 @@ impl<H: Hasher> BatchMerkleProof<H> {
 /// immediately follows the left node.
 fn are_siblings(left: usize, right: usize) -> bool {
     left & 1 == 0 && right - 1 == left
+}
+
+/// Computes the Merkle path from the computed (partial) tree.
+pub fn get_path<H: Hasher>(
+    index: usize,
+    tree: &BTreeMap<usize, <H as Hasher>::Digest>,
+    depth: usize,
+) -> Result<Vec<H::Digest>, MerkleTreeError> {
+    let mut index = index + (1 << depth);
+    let leaf = if let Some(leaf) = tree.get(&index) {
+        *leaf
+    } else {
+        return Err(MerkleTreeError::InvalidProof);
+    };
+
+    let mut proof = vec![leaf];
+    while index > 1 {
+        let leaf = if let Some(leaf) = tree.get(&(index ^ 1)) {
+            *leaf
+        } else {
+            return Err(MerkleTreeError::InvalidProof);
+        };
+
+        proof.push(leaf);
+        index >>= 1;
+    }
+
+    Ok(proof)
 }

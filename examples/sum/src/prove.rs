@@ -9,6 +9,7 @@ pub(crate) use air::PROOF_OPTIONS;
 
 mod prover;
 pub use prover::WorkProver;
+use winter_circom_prover::hash::{HashFunction, Poseidon};
 
 fn main() -> Result<(), WinterCircomError> {
     // parameters
@@ -16,8 +17,8 @@ fn main() -> Result<(), WinterCircomError> {
 
     // build proof
     let options = PROOF_OPTIONS.get_proof_options();
-    let prover = WorkProver::new(options.clone());
+    let prover = WorkProver::<Poseidon>::new(options);
     let trace = prover.build_trace(start, PROOF_OPTIONS.trace_length);
 
-    circom_prove(prover, trace, "sum", LoggingLevel::Default)
+    circom_prove(prover, trace,"sum", LoggingLevel::Default)
 }

@@ -4,7 +4,6 @@
 // LICENSE file in the root directory of this source tree.
 
 use core::fmt;
-use utils::string::String;
 
 use crypto::RandomCoinError;
 
@@ -12,10 +11,10 @@ use crypto::RandomCoinError;
 // ================================================================================================
 
 /// Defines errors which can occur during FRI proof verification.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum VerifierError {
     /// Attempt to draw a random value from a public coin failed.
-    PublicCoinError(RandomCoinError),
+    RandomCoinError(RandomCoinError),
     /// Folding factor specified for the protocol is not supported. Currently, supported folding
     /// factors are: 4, 8, and 16.
     UnsupportedFoldingFactor(usize),
@@ -25,8 +24,6 @@ pub enum VerifierError {
     LayerCommitmentMismatch,
     /// Degree-respecting projection was not performed correctly at one of the layers.
     InvalidLayerFolding(usize),
-    /// Failed to construct a Merkle tree out of FRI remainder values.
-    RemainderTreeConstructionFailed(String),
     /// FRI remainder did not match the commitment.
     RemainderCommitmentMismatch,
     /// Degree-respecting projection was not performed correctly at the last layer.
@@ -43,24 +40,20 @@ impl fmt::Display for VerifierError {
     #[rustfmt::skip]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::PublicCoinError(err) => {
-                write!(f, "failed to draw a random value from the public coin: {}", err)
+            Self::RandomCoinError(err) => {
+                write!(f, "failed to draw a random value from the public coin: {err}")
             }
             Self::UnsupportedFoldingFactor(value) => {
-                write!(f, "folding factor {} is not currently supported", value)
+                write!(f, "folding factor {value} is not currently supported")
             }
             Self::NumPositionEvaluationMismatch(num_positions, num_evaluations) => write!(f,
-                "the number of query positions must be the same as the number of polynomial evaluations, but {} and {} were provided",
-                num_positions, num_evaluations
+                "the number of query positions must be the same as the number of polynomial evaluations, but {num_positions} and {num_evaluations} were provided"
             ),
             Self::LayerCommitmentMismatch => {
                 write!(f, "FRI queries did not match layer commitment made by the prover")
             }
             Self::InvalidLayerFolding(layer) => {
-                write!(f, "degree-respecting projection is not consistent at layer {}", layer)
-            }
-            Self::RemainderTreeConstructionFailed(err_msg) => {
-                write!(f, "FRI remainder Merkle tree could not be constructed: {}", err_msg)
+                write!(f, "degree-respecting projection is not consistent at layer {layer}")
             }
             Self::RemainderCommitmentMismatch => {
                 write!(f, "FRI remainder did not match the commitment")
@@ -72,10 +65,10 @@ impl fmt::Display for VerifierError {
                 write!(f, "FRI remainder expected degree is greater than number of remainder values")
             }
             Self::RemainderDegreeMismatch(degree) => {
-                write!(f, "FRI remainder is not a valid degree {} polynomial", degree)
+                write!(f, "FRI remainder is not a valid degree {degree} polynomial")
             }
             Self::DegreeTruncation(degree, folding, layer) => {
-                write!(f, "degree reduction from {} by {} at layer {} results in degree truncation", degree, folding, layer)
+                write!(f, "degree reduction from {degree} by {folding} at layer {layer} results in degree truncation")
             }
         }
     }

@@ -97,13 +97,12 @@ pub mod fft;
 pub mod polynom;
 
 mod field;
-pub use field::{ExtensibleField, ExtensionOf, FieldElement, StarkField};
+pub use field::{ExtensibleField, ExtensionOf, FieldElement, StarkField, ToElements};
 pub mod fields {
     //! Finite field implementations.
     //!
     //! This module contains concrete implementations of base STARK fields as well as extensions
     //! of these field.
-
     pub use super::field::f256;
     pub use super::field::f128;
     pub use super::field::f62;

@@ -11,7 +11,7 @@ concurrent = ["std", "winterfell/concurrent"]
 
 [dependencies]
 rug = "1.16"
-winterfell = { version = "0.4.0", default-features = false, path = "../winterfell/winterfell" }
+winterfell = { version = "0.6.4", default-features = false, path = "../winterfell/winterfell" }
 serde = { version = "1.0", default-features = false }
 serde_json = { version = "1.0", default-features = false }
 colored = "2.0"

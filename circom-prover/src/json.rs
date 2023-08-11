@@ -1,10 +1,18 @@
 use serde::Serialize;
 use serde_json::{json, Value};
-use winterfell::{
-    crypto::{Digest, ElementHasher, RandomCoin},
-    math::{fields::f256::BaseElement, log2, FieldElement, StarkField},
-    Air, Serializable, StarkProof,
-};
+use winterfell::{crypto::{ElementHasher, RandomCoin}, math::{fields::f256::BaseElement, log2, StarkField}, Air, Serializable, StarkProof, EvaluationFrame, ConstraintQueries};
+use winterfell::crypto::{DefaultRandomCoin, Digest};
+use winterfell::crypto::hashers::Poseidon;
+use winterfell::math::{FieldElement, ToElements};
+
+// pub struct Channel< H: ElementHasher<BaseField = BaseElement>> {
+//     // trace queries
+//     trace_commitments: Vec<H::Digest>,
+//     // constraint queries
+//     constraint_commitment: H::Digest,
+//     // FRI proof
+//     fri_commitments: Option<Vec<H::Digest>>,
+// }
 
 /// Parse a [StarkProof] into a Circom-usable JSON object.
 ///
@@ -46,7 +54,7 @@ use winterfell::{
 /// ```
 ///
 // TODO: Return errors instead of panicking (`.map_err()` and `?` instead of `.unwrap()`)
-pub fn proof_to_json<AIR, H>(
+pub fn proof_to_json<AIR, H,RandCoin>(
     proof: StarkProof,
     air: &AIR,
     pub_inputs: AIR::PublicInputs,
@@ -55,7 +63,8 @@ pub fn proof_to_json<AIR, H>(
 where
     AIR: Air<BaseField = BaseElement>,
     <AIR as Air>::PublicInputs: Serialize,
-    H: ElementHasher<BaseField = BaseElement>,
+    H: ElementHasher<BaseField = AIR::BaseField>,
+    RandCoin: RandomCoin<BaseField = AIR::BaseField, Hasher = H>
 {
     let StarkProof {
         context,
@@ -66,6 +75,14 @@ where
         fri_proof,
         pow_nonce,
     } = proof;
+
+    // make sure AIR and proof base fields are the same
+    if AIR::BaseField::get_modulus_le_bytes() != context.field_modulus_bytes() {
+        // return Err(VerifierError::InconsistentBaseField);
+        println!("InconsistentBaseField");
+    }
+
+    let constraint_frame_width = air.context().num_constraint_composition_columns();
 
     let num_trace_segments = air.trace_layout().num_segments();
     let main_trace_width = air.trace_layout().main_trace_width();
@@ -82,21 +99,16 @@ where
     // ===========================================================================
 
     // serialize public inputs and context
-    let mut pub_coin_seed = Vec::new();
-    pub_inputs.write_into(&mut pub_coin_seed);
-    context.write_into(&mut pub_coin_seed);
+    let mut pub_coin_seed = context.to_elements();
+    pub_coin_seed.append(&mut pub_inputs.to_elements());
 
-    let mut public_coin = RandomCoin::<BaseElement, H>::new(&pub_coin_seed);
+    let mut public_coin = RandCoin::new(&pub_coin_seed);
 
     // turn into f256 field elements
-    while pub_coin_seed.len() % BaseElement::ELEMENT_BYTES != 0 {
-        pub_coin_seed.push(0);
+
+    while pub_coin_seed.len() % AIR::BaseField::ELEMENT_BYTES != 0 {
+        pub_coin_seed.push(AIR::BaseField::ZERO);
     }
-    let pub_coin_seed = pub_coin_seed
-        .as_slice()
-        .chunks(BaseElement::ELEMENT_BYTES)
-        .map(|bytes| BaseElement::from_le_bytes(bytes))
-        .collect::<Vec<_>>();
 
     // COMMITMENTS
     // ===========================================================================
@@ -109,40 +121,45 @@ where
         )
         .unwrap();
 
+
     public_coin.reseed(trace_commitments[0]);
     public_coin.reseed(constraint_commitment);
 
     // map commitments to BaseElements
     let trace_commitment = trace_commitments
         .iter()
-        .map(|c| BaseElement::from_le_bytes(&c.as_bytes()))
+        .map(|c| AIR::BaseField::from_le_bytes(&c.as_bytes()))
         .collect::<Vec<_>>()
         .remove(0);
-    let constraint_commitment: BaseElement =
-        BaseElement::from_le_bytes(&constraint_commitment.as_bytes());
+    let constraint_commitment =
+        AIR::BaseField::from_le_bytes(&constraint_commitment.as_bytes());
 
     // OOD FRAME
     // ===========================================================================
 
     // parse ood_frame, ignoring the ood_aux_trace_frame
-    let (ood_trace_frame, _, ood_constraint_evaluations) = ood_frame
-        .parse::<BaseElement>(main_trace_width, aux_trace_width, air.ce_blowup_factor())
+    let (ood_trace_evaluations, ood_constraint_evaluations) = ood_frame
+        .parse::<AIR::BaseField>(main_trace_width, aux_trace_width, constraint_frame_width)
         .unwrap();
 
-    public_coin.reseed(H::hash_elements(ood_trace_frame.current()));
-    public_coin.reseed(H::hash_elements(ood_trace_frame.next()));
+    let ood_trace_frame =
+        TraceOodFrame::new(ood_trace_evaluations, main_trace_width, aux_trace_width);
+
+    public_coin.reseed(H::hash_elements(ood_trace_frame.values()));
     public_coin.reseed(H::hash_elements(&ood_constraint_evaluations));
 
     // OOD FRAME CONSTRAINT EVALUATIONS
     // FIXME: fix periodic values
-    let mut ood_frame_constraint_evaluation = BaseElement::zeroed_vector(air.trace_info().width());
-    air.evaluate_transition::<BaseElement>(
-        &ood_trace_frame,
+    let mut ood_frame_constraint_evaluation = AIR::BaseField::zeroed_vector(air.trace_info().width());
+    air.evaluate_transition::<AIR::BaseField>(
+        &ood_trace_frame.main_frame(),
         &[],
         &mut ood_frame_constraint_evaluation,
     );
 
-    let ood_trace_frame = (ood_trace_frame.current(), ood_trace_frame.next());
+    let main_frame = ood_trace_frame.main_frame();
+
+    let ood_trace_frame = (main_frame.current(), main_frame.next());
 
     // FRI PROOF PART 1
     // ===========================================================================
@@ -158,7 +175,7 @@ where
     // of the commitment for the remainder
     let fri_commitments = fri_commitments
         .iter()
-        .map(|c| BaseElement::from_le_bytes(&c.as_bytes()))
+        .map(|c| AIR::BaseField::from_le_bytes(&c.as_bytes()))
         .collect::<Vec<_>>();
 
     // QUERY POSITIONS
@@ -174,9 +191,9 @@ where
     // ===========================================================================
 
     // parse fri proof into Merkle proofs and queries for each layer
-    let fri_remainder = fri_proof.parse_remainder::<BaseElement>().unwrap();
+    let fri_remainder = fri_proof.parse_remainder::<AIR::BaseField>().unwrap();
     let (mut fri_layer_queries, fri_layer_proofs) = fri_proof
-        .parse_layers::<H, BaseElement>(lde_domain_size, folding_factor)
+        .parse_layers::<H, AIR::BaseField>(lde_domain_size, folding_factor)
         .unwrap();
 
     // convert batch merkle proofs into authentication paths
@@ -190,12 +207,12 @@ where
             domain_size /= folding_factor;
 
             merkle_proof
-                .to_paths(&indexes)
+                .into_paths(&indexes)
                 .unwrap()
                 .iter()
                 .map(|path| {
                     path.iter()
-                        .map(|digest| BaseElement::from_le_bytes(&digest.as_bytes()))
+                        .map(|digest| AIR::BaseField::from_le_bytes(&digest.as_bytes()))
                         .collect::<Vec<_>>()
                 })
                 .collect::<Vec<_>>()
@@ -211,11 +228,11 @@ where
 
             for path in paths.iter_mut() {
                 while path.len() < tree_depth {
-                    path.push(BaseElement::ZERO);
+                    path.push(AIR::BaseField::ZERO);
                 }
             }
             while paths.len() < num_queries {
-                paths.push(vec![BaseElement::ZERO; tree_depth]);
+                paths.push(vec![AIR::BaseField::ZERO; tree_depth]);
             }
             paths
         })
@@ -224,7 +241,7 @@ where
     // pad fri layer queries with zeroes to ensure constant size arrays
     for queries in fri_layer_queries.iter_mut() {
         while queries.len() < num_queries * folding_factor {
-            queries.push(BaseElement::ZERO);
+            queries.push(AIR::BaseField::ZERO);
         }
     }
 
@@ -235,18 +252,18 @@ where
     // main trace segment) and parse it into a Merkle proof and trace states
     let (trace_query_proofs, trace_evaluations) = trace_queries
         .remove(0)
-        .parse::<H, BaseElement>(lde_domain_size, num_queries, main_trace_width)
+        .parse::<H, AIR::BaseField>(lde_domain_size, num_queries, main_trace_width)
         .unwrap();
 
     // convert the batch Merkle proof into authentication paths
     // and map hash digests to BaseElements
     let trace_query_proofs = trace_query_proofs
-        .to_paths(&query_positions)
+        .into_paths(&query_positions)
         .unwrap()
         .iter()
         .map(|path| {
             path.iter()
-                .map(|digest| BaseElement::from_le_bytes(&digest.as_bytes()))
+                .map(|digest| AIR::BaseField::from_le_bytes(&digest.as_bytes()))
                 .collect::<Vec<_>>()
         })
         .collect::<Vec<Vec<_>>>();
@@ -259,21 +276,21 @@ where
 
     // CONSTRAINT QUERIES
     // ===========================================================================
-
+    // let constraint_queries = ConstraintQueries::new(constraint_queries, air)?;
     // parse constraint queries back into a Merkle proof and a vector of states
     let (constraint_query_proofs, constraint_evaluations) = constraint_queries
-        .parse::<H, BaseElement>(lde_domain_size, num_queries, air.ce_blowup_factor())
+        .parse::<H, AIR::BaseField>(lde_domain_size, num_queries, constraint_frame_width)
         .unwrap();
 
     // convert the batch Merkle proof into authentication paths
     // and map hash digests to BaseElements
     let constraint_query_proofs = constraint_query_proofs
-        .to_paths(&query_positions)
+        .into_paths(&query_positions)
         .unwrap()
         .iter()
         .map(|path| {
             path.iter()
-                .map(|digest| BaseElement::from_le_bytes(&digest.as_bytes()))
+                .map(|digest| AIR::BaseField::from_le_bytes(&digest.as_bytes()))
                 .collect::<Vec<_>>()
         })
         .collect::<Vec<_>>();
@@ -288,7 +305,7 @@ where
     // ===========================================================================
 
     json!({
-        "addicity_root": BaseElement::TWO_ADIC_ROOT_OF_UNITY,
+        "addicity_root": AIR::BaseField::TWO_ADIC_ROOT_OF_UNITY,
         "constraint_commitment": constraint_commitment,
         "constraint_evaluations": constraint_evaluations,
         "constraint_query_proofs": constraint_query_proofs,
@@ -328,4 +345,92 @@ fn fold_positions(
     }
 
     result
+}
+
+// TRACE OUT-OF-DOMAIN FRAME
+// ================================================================================================
+
+pub struct TraceOodFrame<E: FieldElement> {
+    values: Vec<E>,
+    main_trace_width: usize,
+    aux_trace_width: usize,
+}
+
+impl<E: FieldElement> TraceOodFrame<E> {
+    pub fn new(values: Vec<E>, main_trace_width: usize, aux_trace_width: usize) -> Self {
+        Self {
+            values,
+            main_trace_width,
+            aux_trace_width,
+        }
+    }
+
+    pub fn values(&self) -> &[E] {
+        &self.values
+    }
+
+    // The out-of-domain frame is stored as one vector of interleaved values, one from the
+    // current row and the other from the next row. See `OodFrame::set_trace_states`.
+    // Thus we need to untangle the current and next rows stored in `Self::values` and we
+    // do that for the main and auxiliary traces separately.
+    // Pictorially, for the main trace portion:
+    //
+    // Input vector: [a1, b1, a2, b2, ..., an, bn, c1, d1, c2, d2, ..., cm, dm]
+    // with n being the main trace width and m the auxiliary trace width.
+    //
+    // Output:
+    //          +-------+-------+-------+-------+-------+
+    //          |  a1   |   a2  |   a3  |  ...  |   an  |
+    //          +-------+-------+-------+-------+-------+
+    //          |  b1   |   b2  |   b3  |  ...  |   bn  |
+    //          +-------+-------+-------+-------+-------+
+    pub fn main_frame(&self) -> EvaluationFrame<E> {
+        let mut current = vec![E::ZERO; self.main_trace_width];
+        let mut next = vec![E::ZERO; self.main_trace_width];
+
+        for (i, a) in self
+            .values
+            .chunks(2)
+            .take(self.main_trace_width)
+            .enumerate()
+        {
+            current[i] = a[0];
+            next[i] = a[1];
+        }
+
+        EvaluationFrame::from_rows(current, next)
+    }
+
+    // Similar to `Self::main_frame`, the following untangles the current and next rows stored
+    // in `Self::values` for the auxiliary trace portion when it exists else it returns `None`.
+    // Pictorially:
+    //
+    // Input vector: [a1, b1, a2, b2, ..., an, bn, c1, d1, c2, d2, ..., cm, dm]
+    // with n being the main trace width and m the auxiliary trace width.
+    //
+    // Output:
+    //          +-------+-------+-------+-------+-------+
+    //          |  c1   |   c2  |   c3  |  ...  |   cm  |
+    //          +-------+-------+-------+-------+-------+
+    //          |  d1   |   d2  |   d3  |  ...  |   dm  |
+    //          +-------+-------+-------+-------+-------+
+    pub fn aux_frame(&self) -> Option<EvaluationFrame<E>> {
+        if self.aux_trace_width == 0 {
+            None
+        } else {
+            let mut current_aux = vec![E::ZERO; self.aux_trace_width];
+            let mut next_aux = vec![E::ZERO; self.aux_trace_width];
+
+            for (i, a) in self
+                .values
+                .chunks(2)
+                .skip(self.main_trace_width)
+                .enumerate()
+            {
+                current_aux[i] = a[0];
+                next_aux[i] = a[1];
+            }
+            Some(EvaluationFrame::from_rows(current_aux, next_aux))
+        }
+    }
 }

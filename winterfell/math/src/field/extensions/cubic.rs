@@ -29,7 +29,7 @@ pub struct CubeExtension<B: ExtensibleField<3>>(B, B, B);
 
 impl<B: ExtensibleField<3>> CubeExtension<B> {
     /// Returns a new extension element instantiated from the provided base elements.
-    pub fn new(a: B, b: B, c: B) -> Self {
+    pub const fn new(a: B, b: B, c: B) -> Self {
         Self(a, b, c)
     }
 
@@ -39,19 +39,27 @@ impl<B: ExtensibleField<3>> CubeExtension<B> {
     }
 
     /// Converts a vector of base elements into a vector of elements in a cubic extension field
-    /// by fusing three adjacent base elements together. The output vector is half the length of
-    /// the source vector.
+    /// by fusing three adjacent base elements together. The output vector is one-third the length
+    /// of the source vector.
     fn base_to_cubic_vector(source: Vec<B>) -> Vec<Self> {
         debug_assert!(
-            source.len() % 3 == 0,
+            source.len() % Self::EXTENSION_DEGREE == 0,
             "source vector length must be divisible by three, but was {}",
             source.len()
         );
         let mut v = core::mem::ManuallyDrop::new(source);
         let p = v.as_mut_ptr();
-        let len = v.len() / 3;
-        let cap = v.capacity() / 3;
+        let len = v.len() / Self::EXTENSION_DEGREE;
+        let cap = v.capacity() / Self::EXTENSION_DEGREE;
         unsafe { Vec::from_raw_parts(p as *mut Self, len, cap) }
+    }
+
+    /// Returns an array of base field elements comprising this extension field element.
+    ///
+    /// The order of abase elements in the returned array is the same as the order in which
+    /// the elements are provided to the [CubeExtension::new()] constructor.
+    pub const fn to_base_elements(self) -> [B; 3] {
+        [self.0, self.1, self.2]
     }
 }
 
@@ -59,10 +67,26 @@ impl<B: ExtensibleField<3>> FieldElement for CubeExtension<B> {
     type PositiveInteger = B::PositiveInteger;
     type BaseField = B;
 
-    const ELEMENT_BYTES: usize = B::ELEMENT_BYTES * 3;
+    const EXTENSION_DEGREE: usize = 3;
+
+    const ELEMENT_BYTES: usize = B::ELEMENT_BYTES * Self::EXTENSION_DEGREE;
     const IS_CANONICAL: bool = B::IS_CANONICAL;
     const ZERO: Self = Self(B::ZERO, B::ZERO, B::ZERO);
     const ONE: Self = Self(B::ONE, B::ZERO, B::ZERO);
+
+    // ALGEBRA
+    // --------------------------------------------------------------------------------------------
+
+    #[inline]
+    fn double(self) -> Self {
+        Self(self.0.double(), self.1.double(), self.2.double())
+    }
+
+    #[inline]
+    fn square(self) -> Self {
+        let a = <B as ExtensibleField<3>>::square([self.0, self.1, self.2]);
+        Self(a[0], a[1], a[2])
+    }
 
     #[inline]
     fn inv(self) -> Self {
@@ -92,6 +116,39 @@ impl<B: ExtensibleField<3>> FieldElement for CubeExtension<B> {
         let result = <B as ExtensibleField<3>>::frobenius([self.0, self.1, self.2]);
         Self(result[0], result[1], result[2])
     }
+
+    // BASE ELEMENT CONVERSIONS
+    // --------------------------------------------------------------------------------------------
+
+    fn base_element(&self, i: usize) -> Self::BaseField {
+        match i {
+            0 => self.0,
+            1 => self.1,
+            2 => self.2,
+            _ => panic!("element index must be smaller than 3, but was {i}"),
+        }
+    }
+
+    fn slice_as_base_elements(elements: &[Self]) -> &[Self::BaseField] {
+        let ptr = elements.as_ptr();
+        let len = elements.len() * Self::EXTENSION_DEGREE;
+        unsafe { slice::from_raw_parts(ptr as *const Self::BaseField, len) }
+    }
+
+    fn slice_from_base_elements(elements: &[Self::BaseField]) -> &[Self] {
+        assert!(
+            elements.len() % Self::EXTENSION_DEGREE == 0,
+            "number of base elements must be divisible by 3, but was {}",
+            elements.len()
+        );
+
+        let ptr = elements.as_ptr();
+        let len = elements.len() / Self::EXTENSION_DEGREE;
+        unsafe { slice::from_raw_parts(ptr as *const Self, len) }
+    }
+
+    // SERIALIZATION / DESERIALIZATION
+    // --------------------------------------------------------------------------------------------
 
     fn elements_as_bytes(elements: &[Self]) -> &[u8] {
         unsafe {
@@ -123,17 +180,14 @@ impl<B: ExtensibleField<3>> FieldElement for CubeExtension<B> {
         Ok(slice::from_raw_parts(p as *const Self, len))
     }
 
+    // UTILITIES
+    // --------------------------------------------------------------------------------------------
+
     fn zeroed_vector(n: usize) -> Vec<Self> {
         // get three times the number of base elements and re-interpret them as cubic field
         // elements
-        let result = B::zeroed_vector(n * 3);
+        let result = B::zeroed_vector(n * Self::EXTENSION_DEGREE);
         Self::base_to_cubic_vector(result)
-    }
-
-    fn as_base_elements(elements: &[Self]) -> &[Self::BaseField] {
-        let ptr = elements.as_ptr();
-        let len = elements.len() * 3;
-        unsafe { slice::from_raw_parts(ptr as *const Self::BaseField, len) }
     }
 }
 
@@ -335,7 +389,7 @@ impl<B: ExtensibleField<3>> Deserializable for CubeExtension<B> {
 
 #[cfg(test)]
 mod tests {
-    use super::{CubeExtension, DeserializationError, FieldElement, Vec};
+    use super::{CubeExtension, DeserializationError, FieldElement};
     use crate::field::f64::BaseElement;
     use rand_utils::rand_value;
 
@@ -400,10 +454,13 @@ mod tests {
             ),
         ];
 
-        let expected: Vec<u8> = vec![
-            1, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 0, 0,
-            0, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0, 6, 0, 0, 0, 0, 0, 0, 0,
-        ];
+        let mut expected = vec![];
+        expected.extend_from_slice(&source[0].0.inner().to_le_bytes());
+        expected.extend_from_slice(&source[0].1.inner().to_le_bytes());
+        expected.extend_from_slice(&source[0].2.inner().to_le_bytes());
+        expected.extend_from_slice(&source[1].0.inner().to_le_bytes());
+        expected.extend_from_slice(&source[1].1.inner().to_le_bytes());
+        expected.extend_from_slice(&source[1].2.inner().to_le_bytes());
 
         assert_eq!(
             expected,
@@ -413,12 +470,7 @@ mod tests {
 
     #[test]
     fn bytes_as_elements() {
-        let bytes: Vec<u8> = vec![
-            1, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 0, 0,
-            0, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0, 6, 0, 0, 0, 0, 0, 0, 0, 7,
-        ];
-
-        let expected = vec![
+        let elements = vec![
             CubeExtension(
                 BaseElement::new(1),
                 BaseElement::new(2),
@@ -431,9 +483,18 @@ mod tests {
             ),
         ];
 
+        let mut bytes = vec![];
+        bytes.extend_from_slice(&elements[0].0.inner().to_le_bytes());
+        bytes.extend_from_slice(&elements[0].1.inner().to_le_bytes());
+        bytes.extend_from_slice(&elements[0].2.inner().to_le_bytes());
+        bytes.extend_from_slice(&elements[1].0.inner().to_le_bytes());
+        bytes.extend_from_slice(&elements[1].1.inner().to_le_bytes());
+        bytes.extend_from_slice(&elements[1].2.inner().to_le_bytes());
+        bytes.extend_from_slice(&BaseElement::new(5).inner().to_le_bytes());
+
         let result = unsafe { CubeExtension::<BaseElement>::bytes_as_elements(&bytes[..48]) };
         assert!(result.is_ok());
-        assert_eq!(expected, result.unwrap());
+        assert_eq!(elements, result.unwrap());
 
         let result = unsafe { CubeExtension::<BaseElement>::bytes_as_elements(&bytes) };
         assert!(matches!(result, Err(DeserializationError::InvalidValue(_))));
@@ -471,7 +532,7 @@ mod tests {
 
         assert_eq!(
             expected,
-            CubeExtension::<BaseElement>::as_base_elements(&elements)
+            CubeExtension::<BaseElement>::slice_as_base_elements(&elements)
         );
     }
 }

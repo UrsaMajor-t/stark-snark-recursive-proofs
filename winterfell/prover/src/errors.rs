@@ -10,7 +10,7 @@ use core::fmt;
 // PROVER ERROR
 // ================================================================================================
 /// Represents an error returned by the prover during an execution of the protocol.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProverError {
     /// This error occurs when a transition constraint evaluated over a specific execution trace
     /// does not evaluate to zero at any of the steps.
@@ -28,13 +28,13 @@ impl fmt::Display for ProverError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::UnsatisfiedTransitionConstraintError(step) => {
-                write!(f, "a transition constraint was not satisfied at step {}", step)
+                write!(f, "a transition constraint was not satisfied at step {step}")
             }
             Self::MismatchedConstraintPolynomialDegree(expected, actual) => {
-                write!(f, "the constraint polynomial's components do not all have the same degree; expected {}, but was {}", expected, actual)
+                write!(f, "the constraint polynomial's components do not all have the same degree; expected {expected}, but was {actual}")
             }
             Self::UnsupportedFieldExtension(degree) => {
-                write!(f, "field extension of degree {} is not supported for the specified base field", degree)
+                write!(f, "field extension of degree {degree} is not supported for the specified base field")
             }
         }
     }

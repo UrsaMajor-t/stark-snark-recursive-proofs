@@ -7,8 +7,8 @@
 
 use crate::{ProofOptions, TraceInfo, TraceLayout};
 use core::cmp;
+use crypto::Hasher;
 use fri::FriProof;
-use math::log2;
 use utils::{
     collections::Vec, ByteReader, Deserializable, DeserializationError, Serializable, SliceReader,
 };
@@ -102,16 +102,26 @@ impl StarkProof {
     /// security level is returned. Usually, the number of queries needed for provable security is
     /// 2x - 3x higher than the number of queries needed for conjectured security at the same
     /// security level.
-    pub fn security_level(&self, conjectured: bool) -> u32 {
+    pub fn security_level<H: Hasher>(&self, conjectured: bool) -> u32 {
         if conjectured {
             get_conjectured_security(
                 self.context.options(),
                 self.context.num_modulus_bits(),
-                self.lde_domain_size() as u64,
+                self.trace_length() as u64,
+                H::COLLISION_RESISTANCE,
             )
         } else {
-            // TODO: implement provable security estimation
-            unimplemented!("proven security estimation has not been implement yet")
+            #[cfg(not(feature = "std"))]
+            panic!("proven security level is not available in no_std mode");
+
+            #[cfg(feature = "std")]
+            get_proven_security(
+                self.context.options(),
+                self.context.num_modulus_bits(),
+                self.lde_domain_size() as u64,
+                self.trace_length() as u64,
+                H::COLLISION_RESISTANCE,
+            )
         }
     }
 
@@ -175,17 +185,15 @@ impl StarkProof {
 fn get_conjectured_security(
     options: &ProofOptions,
     base_field_bits: u32,
-    lde_domain_size: u64,
+    trace_domain_size: u64,
+    collision_resistance: u32,
 ) -> u32 {
     // compute max security we can get for a given field size
     let field_size = base_field_bits * options.field_extension().degree();
-    let field_security = field_size - lde_domain_size.trailing_zeros();
-
-    // compute max security we can get for a given hash function
-    let hash_fn_security = options.hash_fn().collision_resistance();
+    let field_security = field_size - trace_domain_size.trailing_zeros();
 
     // compute security we get by executing multiple query rounds
-    let security_per_query = log2(options.blowup_factor());
+    let security_per_query = options.blowup_factor().ilog2();
     let mut query_security = security_per_query * options.num_queries() as u32;
 
     // include grinding factor contributions only for proofs adequate security
@@ -195,6 +203,65 @@ fn get_conjectured_security(
 
     cmp::min(
         cmp::min(field_security, query_security) - 1,
-        hash_fn_security,
+        collision_resistance,
+    )
+}
+
+#[cfg(feature = "std")]
+/// Estimates proven security level for the specified proof parameters.
+fn get_proven_security(
+    options: &ProofOptions,
+    base_field_bits: u32,
+    lde_domain_size: u64,
+    trace_domain_size: u64,
+    collision_resistance: u32,
+) -> u32 {
+    let extension_field_bits = (base_field_bits * options.field_extension().degree()) as f64;
+
+    let blowup_bits = options.blowup_factor().ilog2() as f64;
+    let num_fri_queries = options.num_queries() as f64;
+    let lde_size_bits = lde_domain_size.trailing_zeros() as f64;
+
+    // blowup_plus_bits is the number of bits in the blowup factor which is the inverse of
+    // `\rho^+ := (trace_domain_size + 2) / lde_domain_size`. `\rho^+` is used in order to define a larger
+    // agreement parameter `\alpha^+ := (1 + 1/2m)\sqrt{rho^+} := 1 - \theta^+`. The reason for
+    // running FRI with a larger agreement parameter is to account for the simplified
+    // DEEP composition polynomial. See Protocol 3 in https://eprint.iacr.org/2022/1216.
+    let blowup_plus_bits = ((lde_domain_size as f64) / (trace_domain_size as f64 + 2_f64)).log2();
+
+    // m is a parameter greater or equal to 3.
+    // A larger m gives a worse field security bound but a better query security bound.
+    // An optimal value of m is then a value that would balance field and query security
+    // but there is no simple closed form solution.
+    // This sets m so that field security is equal to the best query security for any value
+    // of m, unless the calculated value is less than 3 in which case it gets rounded up to 3.
+    let mut m = extension_field_bits + 1.0;
+    m -= options.grinding_factor() as f64;
+    m -= 1.5 * blowup_bits;
+    m -= 0.5 * num_fri_queries * blowup_plus_bits;
+    m -= 2.0 * lde_size_bits;
+    m /= 7.0;
+    m = 2.0_f64.powf(m);
+    m -= 0.5;
+    m = m.max(3.0);
+
+    // compute pre-FRI query security
+    // this considers only the third component given in the corresponding part of eq. 20
+    // in https://eprint.iacr.org/2021/582, i.e. (m+1/2)^7.n^2 / (2\rho^1.5.q) as all
+    // other terms are negligible in comparison.
+    let pre_query_security = (extension_field_bits + 1.0
+        - 3.0 / 2.0 * blowup_bits
+        - 2.0 * lde_size_bits
+        - 7.0 * (m + 0.5).log2()) as u32;
+
+    // compute security we get by executing multiple query rounds
+    let security_per_query = 0.5 * blowup_plus_bits - (1.0 + 1.0 / (2.0 * m)).log2();
+    let mut query_security = (security_per_query * num_fri_queries) as u32;
+
+    query_security += options.grinding_factor();
+
+    cmp::min(
+        cmp::min(pre_query_security, query_security) - 1,
+        collision_resistance,
     )
 }

@@ -11,7 +11,7 @@ use utils::string::String;
 // VERIFIER ERROR
 // ================================================================================================
 /// Represents an error returned by the verifier during an execution of the protocol.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum VerifierError {
     /// This error occurs when base field read by a verifier from a proof does not match the
     /// base field of AIR with which the verifier was instantiated.
@@ -51,10 +51,10 @@ impl fmt::Display for VerifierError {
                 write!(f, "base field of the proof does not match base field of the specified AIR")
             }
             Self::UnsupportedFieldExtension(degree) => {
-                write!(f, "field extension of degree {} is not supported for the proof base field", degree)
+                write!(f, "field extension of degree {degree} is not supported for the proof base field")
             }
             Self::ProofDeserializationError(msg) => {
-                write!(f, "proof deserialization failed: {}", msg)
+                write!(f, "proof deserialization failed: {msg}")
             }
             Self::RandomCoinError => {
                 write!(f, "failed to draw a random value from a random coin")
@@ -72,7 +72,7 @@ impl fmt::Display for VerifierError {
                 write!(f, "query seed proof-of-work verification failed")
             }
             Self::FriVerificationFailed(err) => {
-                write!(f, "verification of low-degree proof failed: {}", err)
+                write!(f, "verification of low-degree proof failed: {err}")
             }
         }
     }

@@ -445,17 +445,24 @@ use serde::Serialize;
 mod json;
 
 mod circom;
+
 pub use circom::{circom_compile, circom_prove, circom_verify};
 
 mod verification;
+
 pub use verification::check_ood_frame;
 
 pub mod utils;
+pub mod hash;
 
 /// Re-export of a modified version of Winterfell, that has been adapted to suit
 /// the needs of this crate.
 pub use winterfell;
-use winterfell::{HashFunction, ProofOptions, TransitionConstraintDegree};
+use winterfell::{Air, ProofOptions, Prover, TransitionConstraintDegree};
+use winterfell::crypto::ElementHasher;
+use winterfell::math::fields::f256::BaseElement;
+use crate::hash::HashFunction;
+use crate::utils::{LoggingLevel, WinterCircomError};
 
 /// Trait for compatibility between implementations of [winterfell::Air::PublicInputs]
 /// and this crate.
@@ -474,6 +481,7 @@ pub trait WinterPublicInputs: Serialize + Clone {
 ///
 /// Element `transition_constraint_degree` is a usize array that will be mapped to
 /// an array of [TransitionConstraintDegree] through its `new()` method.
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct WinterCircomProofOptions<const N: usize> {
     pub trace_length: usize,
     pub trace_width: usize,
@@ -513,13 +521,12 @@ impl<const N: usize> WinterCircomProofOptions<N> {
 
     pub fn get_proof_options(&self) -> ProofOptions {
         assert!(self.trace_length * self.lde_blowup_factor > self.fri_max_remainder_size,
-            "trace_length * lde_blowup_factor must be greater than fri_max_remainder_size for the Circom circuit to work");
+                "trace_length * lde_blowup_factor must be greater than fri_max_remainder_size for the Circom circuit to work");
 
         ProofOptions::new(
             self.num_queries,
             self.lde_blowup_factor,
             self.grinding_factor,
-            HashFunction::Poseidon,
             winterfell::FieldExtension::None,
             self.fri_folding_factor,
             self.fri_max_remainder_size,
@@ -552,4 +559,14 @@ impl<const N: usize> WinterCircomProofOptions<N> {
     pub fn num_assertions(&self) -> usize {
         self.num_assertions
     }
+}
+
+
+pub trait SNP {
+    fn circom_verify(&self
+    ) -> Result<(), WinterCircomError>;
+    fn circom_prove(&self
+    ) -> Result<(), WinterCircomError>;
+    fn circom_compile(&self
+    ) -> Result<(), WinterCircomError>;
 }

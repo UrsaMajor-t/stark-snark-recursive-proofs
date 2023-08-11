@@ -4,9 +4,10 @@
 // LICENSE file in the root directory of this source tree.
 
 use crate::{
+    fft::fft_inputs::FftInputs,
     field::{f128::BaseElement, StarkField},
     polynom,
-    utils::{get_power_series, log2},
+    utils::get_power_series,
 };
 use rand_utils::rand_vector;
 use utils::collections::Vec;
@@ -22,8 +23,8 @@ fn fft_in_place() {
     let domain = build_domain(n);
     let expected = polynom::eval_many(&p, &domain);
     let twiddles = super::get_twiddles::<BaseElement>(n);
-    super::serial::fft_in_place(&mut p, &twiddles, 1, 1, 0);
-    super::permute(&mut p);
+    p.fft_in_place(&twiddles);
+    p.permute();
     assert_eq!(expected, p);
 
     // degree 7
@@ -32,8 +33,8 @@ fn fft_in_place() {
     let domain = build_domain(n);
     let twiddles = super::get_twiddles::<BaseElement>(n);
     let expected = polynom::eval_many(&p, &domain);
-    super::serial::fft_in_place(&mut p, &twiddles, 1, 1, 0);
-    super::permute(&mut p);
+    p.fft_in_place(&twiddles);
+    p.permute();
     assert_eq!(expected, p);
 
     // degree 15
@@ -42,8 +43,8 @@ fn fft_in_place() {
     let domain = build_domain(n);
     let twiddles = super::get_twiddles::<BaseElement>(16);
     let expected = polynom::eval_many(&p, &domain);
-    super::serial::fft_in_place(&mut p, &twiddles, 1, 1, 0);
-    super::permute(&mut p);
+    p.fft_in_place(&twiddles);
+    p.permute();
     assert_eq!(expected, p);
 
     // degree 1023
@@ -52,18 +53,18 @@ fn fft_in_place() {
     let domain = build_domain(n);
     let expected = polynom::eval_many(&p, &domain);
     let twiddles = super::get_twiddles::<BaseElement>(n);
-    super::serial::fft_in_place(&mut p, &twiddles, 1, 1, 0);
-    super::permute(&mut p);
+    p.fft_in_place(&twiddles);
+    p.permute();
     assert_eq!(expected, p);
 }
 
 #[test]
 fn fft_get_twiddles() {
     let n = super::MIN_CONCURRENT_SIZE * 2;
-    let g = BaseElement::get_root_of_unity(log2(n));
+    let g = BaseElement::get_root_of_unity(n.ilog2());
 
     let mut expected = get_power_series(g, n / 2);
-    super::permute(&mut expected);
+    expected.permute();
 
     let twiddles = super::get_twiddles::<BaseElement>(n);
     assert_eq!(expected, twiddles);
@@ -73,6 +74,6 @@ fn fft_get_twiddles() {
 // ================================================================================================
 
 fn build_domain(size: usize) -> Vec<BaseElement> {
-    let g = BaseElement::get_root_of_unity(log2(size));
+    let g = BaseElement::get_root_of_unity(size.ilog2());
     get_power_series(g, size)
 }

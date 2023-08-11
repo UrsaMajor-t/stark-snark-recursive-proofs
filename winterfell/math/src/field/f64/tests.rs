@@ -3,9 +3,7 @@
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the root directory of this source tree.
 
-use super::{
-    AsBytes, BaseElement, DeserializationError, FieldElement, Serializable, StarkField, E, M,
-};
+use super::{BaseElement, DeserializationError, FieldElement, Serializable, StarkField, M};
 use crate::field::{CubeExtension, ExtensionOf, QuadExtension};
 use core::convert::TryFrom;
 use num_bigint::BigUint;
@@ -31,11 +29,6 @@ fn add() {
     let t = BaseElement::new(M - 1);
     assert_eq!(BaseElement::ZERO, t + BaseElement::ONE);
     assert_eq!(BaseElement::ONE, t + BaseElement::new(2));
-
-    // test non-canonical representation
-    let a = BaseElement::new(M - 1) + BaseElement::new(E);
-    let expected = ((((M - 1 + E) as u128) * 2) % (M as u128)) as u64;
-    assert_eq!(expected, (a + a).as_int());
 }
 
 #[test]
@@ -92,18 +85,32 @@ fn mul() {
 }
 
 #[test]
+fn mul_small() {
+    // test overflow
+    let m = BaseElement::MODULUS;
+    let t = BaseElement::from(m - 1);
+    let a = u32::MAX;
+    let expected = BaseElement::new(a as u64) * t;
+
+    assert_eq!(expected, t.mul_small(a));
+}
+
+#[test]
 fn exp() {
     let a = BaseElement::ZERO;
     assert_eq!(a.exp(0), BaseElement::ONE);
     assert_eq!(a.exp(1), BaseElement::ZERO);
+    assert_eq!(a.exp7(), BaseElement::ZERO);
 
     let a = BaseElement::ONE;
     assert_eq!(a.exp(0), BaseElement::ONE);
     assert_eq!(a.exp(1), BaseElement::ONE);
     assert_eq!(a.exp(3), BaseElement::ONE);
+    assert_eq!(a.exp7(), BaseElement::ONE);
 
     let a: BaseElement = rand_value();
     assert_eq!(a.exp(3), a * a * a);
+    assert_eq!(a.exp(7), a.exp7());
 }
 
 #[test]
@@ -118,6 +125,11 @@ fn element_as_int() {
     let v = u64::MAX;
     let e = BaseElement::new(v);
     assert_eq!(v % super::M, e.as_int());
+
+    let e1 = BaseElement::new(0);
+    let e2 = BaseElement::new(M);
+    assert_eq!(e1.as_int(), e2.as_int());
+    assert_eq!(e1.as_int(), 0);
 }
 
 #[test]
@@ -129,10 +141,6 @@ fn equals() {
     assert_eq!(a, b);
     assert_eq!(a.as_int(), b.as_int());
     assert_eq!(a.to_bytes(), b.to_bytes());
-
-    // but their internal representation is not
-    assert_ne!(a.0, b.0);
-    assert_ne!(a.as_bytes(), b.as_bytes());
 }
 
 // ROOTS OF UNITY
@@ -430,6 +438,16 @@ proptest! {
     }
 
     #[test]
+    fn mul_small_proptest(a in any::<u64>(), b in any::<u32>()) {
+        let v1 = BaseElement::from(a);
+        let v2 = b;
+        let result = v1.mul_small(v2);
+
+        let expected = (((a as u128) * (b as u128)) % super::M as u128) as u64;
+        prop_assert_eq!(expected, result.as_int());
+    }
+
+    #[test]
     fn double_proptest(x in any::<u64>()) {
         let v = BaseElement::from(x);
         let result = v.double();
@@ -484,6 +502,14 @@ proptest! {
         prop_assert_eq!(expected, a * b);
     }
 
+    #[test]
+    fn quad_square_proptest(a0 in any::<u64>(), a1 in any::<u64>()) {
+        let a = QuadExtension::<BaseElement>::new(BaseElement::from(a0), BaseElement::from(a1));
+        let expected = a * a;
+
+        prop_assert_eq!(expected, a.square());
+    }
+
     // CUBIC EXTENSION
     // --------------------------------------------------------------------------------------------
     #[test]
@@ -497,5 +523,13 @@ proptest! {
             CubeExtension::<BaseElement>::ONE
         };
         prop_assert_eq!(expected, a * b);
+    }
+
+    #[test]
+    fn cube_square_proptest(a0 in any::<u64>(), a1 in any::<u64>(), a2 in any::<u64>()) {
+        let a = CubeExtension::<BaseElement>::new(BaseElement::from(a0), BaseElement::from(a1), BaseElement::from(a2));
+        let expected = a * a;
+
+        prop_assert_eq!(expected, a.square());
     }
 }

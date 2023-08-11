@@ -3,8 +3,8 @@
 <a href="https://github.com/novifinancial/winterfell/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg"></a>
 <img src="https://github.com/novifinancial/winterfell/workflows/CI/badge.svg?branch=main">
 <a href="https://deps.rs/repo/github/novifinancial/winterfell"><img src="https://deps.rs/repo/github/novifinancial/winterfell/status.svg"></a>
-<img src="https://img.shields.io/badge/prover-rustc_1.60+-lightgray.svg">
-<img src="https://img.shields.io/badge/verifier-rustc_1.60+-lightgray.svg">
+<img src="https://img.shields.io/badge/prover-rustc_1.67+-lightgray.svg">
+<img src="https://img.shields.io/badge/verifier-rustc_1.67+-lightgray.svg">
 <a href="https://crates.io/crates/winterfell"><img src="https://img.shields.io/crates/v/winterfell"></a>
 
 A STARK prover and verifier for arbitrary computations.
@@ -131,9 +131,9 @@ For more information about arithmetization see [air crate](air#Arithmetization),
 
 ```Rust
 use winterfell::{
-    math::{fields::f128::BaseElement, FieldElement},
-    Air, AirContext, Assertion, ByteWriter, EvaluationFrame, ProofOptions, Serializable,
-    TraceInfo, TransitionConstraintDegree,
+    math::{fields::f128::BaseElement, FieldElement, ToElements},
+    Air, AirContext, Assertion, ByteWriter, EvaluationFrame, ProofOptions, TraceInfo,
+    TransitionConstraintDegree,
 };
 
 // Public inputs for our computation will consist of the starting value and the end result.
@@ -142,11 +142,10 @@ pub struct PublicInputs {
     result: BaseElement,
 }
 
-// We need to describe how public inputs can be converted to bytes.
-impl Serializable for PublicInputs {
-    fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        target.write(self.start);
-        target.write(self.result);
+// We need to describe how public inputs can be converted to field elements.
+impl ToElements<BaseElement> for PublicInputs {
+    fn to_elements(&self) -> Vec<BaseElement> {
+        vec![self.start, self.result]
     }
 }
 
@@ -259,6 +258,7 @@ impl Prover for WorkProver {
     type BaseField = BaseElement;
     type Air = WorkAir;
     type Trace = TraceTable<Self::BaseField>;
+    type HashFn = Blake3_256<Self::BaseField>;
 
     // Our public inputs consist of the first and last value in the execution trace.
     fn get_pub_inputs(&self, trace: &Self::Trace) -> PublicInputs {
@@ -297,7 +297,6 @@ pub fn prove_work() -> (BaseElement, StarkProof) {
         32, // number of queries
         8,  // blowup factor
         0,  // grinding factor
-        HashFunction::Blake3_256,
         FieldExtension::None,
         8,   // FRI folding factor
         128, // FRI max remainder length
@@ -318,7 +317,7 @@ pub fn verify_work(start: BaseElement, result: BaseElement, proof: StarkProof) {
     // The number of steps and options are encoded in the proof itself, so we
     // don't need to pass them explicitly to the verifier.
     let pub_inputs = PublicInputs { start, result };
-    match winterfell::verify::<WorkAir>(proof, pub_inputs) {
+    match winterfell::verify::<WorkAir, Blake3_256<Self::BaseField>>(proof, pub_inputs) {
         Ok(_) => println!("yay! all good!"),
         Err(_) => panic!("something went terribly wrong!"),
     }
