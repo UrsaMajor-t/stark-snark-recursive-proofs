@@ -3,7 +3,6 @@ use winter_circom_prover::hash::Poseidon;
 use super::air::{PublicInputs, WorkAir, PROOF_OPTIONS};
 use winter_circom_prover::winterfell::{Air, DefaultTraceLde, math::{fields::f256::BaseElement, FieldElement}, ProofOptions, Prover, StarkDomain, Trace, TraceLde, TraceTable};
 use winter_circom_prover::winterfell::crypto::{DefaultRandomCoin, ElementHasher};
-
 pub struct WorkProver<H: ElementHasher> {
     options: ProofOptions,
     _hasher: PhantomData<H>,

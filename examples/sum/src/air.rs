@@ -6,7 +6,6 @@ use winter_circom_prover::{winterfell::{
 }, WinterCircomProofOptions};
 use winter_circom_prover::winterfell::math::ToElements;
 use winter_circom_prover::WinterPublicInputs;
-
 pub const PROOF_OPTIONS: WinterCircomProofOptions<2> =
     WinterCircomProofOptions::new(128,
                                   2,

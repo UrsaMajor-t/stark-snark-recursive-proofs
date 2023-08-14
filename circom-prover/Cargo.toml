@@ -4,14 +4,16 @@ version = "0.1.0"
 edition = "2021"
 rust-version = "1.60"
 
+
+[dependencies]
+
+winterfell = { git = "https://github.com/Orbiter-Finance/winterfell.git", tag = "v1.0-rc1", default-features = false }
+rug = "1.16"
+serde = { version = "1.0", default-features = false }
+serde_json = { version = "1.0", default-features = false }
+colored = "2.0"
+
 [features]
 std = ["winterfell/std", "serde/std", "serde_json/std"]
 default = ["std"]
 concurrent = ["std", "winterfell/concurrent"]
-
-[dependencies]
-rug = "1.16"
-winterfell = { version = "0.6.4", default-features = false, path = "../winterfell/winterfell" }
-serde = { version = "1.0", default-features = false }
-serde_json = { version = "1.0", default-features = false }
-colored = "2.0"
