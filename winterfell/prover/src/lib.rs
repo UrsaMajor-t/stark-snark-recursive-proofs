@@ -304,8 +304,6 @@ pub trait Prover {
             now.elapsed().as_millis()
         );
 
-        println!("constraint_evaluations.num_rows().ilog2():{:?}",constraint_evaluations.num_rows());
-
         // 3 ----- commit to constraint evaluations -----------------------------------------------
 
         // first, build constraint composition polynomial from the constraint evaluation table:
@@ -440,7 +438,6 @@ pub trait Prover {
         // merged into a single value and Merkle authentication paths contain these values already
         let constraint_queries = constraint_commitment.query(&query_positions);
 
-
         // build the proof object
         let proof = channel.build_proof(trace_queries, constraint_queries, fri_proof);
         #[cfg(feature = "std")]
@@ -472,7 +469,6 @@ pub trait Prover {
             composition_poly.data(),
             domain,
         );
-        println!(" composed_evaluations.num_cols():{:?}", composed_evaluations.num_cols());
         #[cfg(feature = "std")]
         debug!(
             "Evaluated {} composition polynomial columns over LDE domain (2^{} elements) in {} ms",

@@ -29,8 +29,8 @@ use utils::{
 /// [parse()](Queries::parse) function should be used.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct Queries {
-  pub  paths: Vec<u8>,
-  pub  values: Vec<u8>,
+    paths: Vec<u8>,
+    values: Vec<u8>,
 }
 
 impl Queries {

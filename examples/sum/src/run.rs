@@ -16,7 +16,7 @@ use winter_circom_prover::hash::Poseidon;
 fn main(){
     let  i =get_instance().unwrap();
     let  i = i.as_ref();
-    // i.circom_compile().unwrap();
+    i.circom_compile().unwrap();
     i.circom_prove().unwrap();
 }
 

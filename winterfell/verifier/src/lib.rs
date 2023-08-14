@@ -54,9 +54,8 @@ use crypto::{ElementHasher, RandomCoin};
 
 use fri::FriVerifier;
 
- mod channel;
+mod channel;
 use channel::VerifierChannel;
-pub use channel::ConstraintQueries;
 
 mod evaluator;
 use evaluator::evaluate_constraints;

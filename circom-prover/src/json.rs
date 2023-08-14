@@ -1,6 +1,6 @@
 use serde::Serialize;
 use serde_json::{json, Value};
-use winterfell::{crypto::{ElementHasher, RandomCoin}, math::{fields::f256::BaseElement, log2, StarkField}, Air, Serializable, StarkProof, EvaluationFrame, ConstraintQueries};
+use winterfell::{crypto::{ElementHasher, RandomCoin}, math::{fields::f256::BaseElement, log2, StarkField}, Air, StarkProof, EvaluationFrame};
 use winterfell::crypto::{DefaultRandomCoin, Digest};
 use winterfell::crypto::hashers::Poseidon;
 use winterfell::math::{FieldElement, ToElements};

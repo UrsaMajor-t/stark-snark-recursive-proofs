@@ -477,6 +477,7 @@ where
         })?;
 
     // WRITE TO FILE
+    // Todo: add constraint_frame_width:\n \{} // constraint_frame_width
 
     let arguments = format!(
         "{}, // addicity\n    \
@@ -495,7 +496,7 @@ where
             {}, // num_transition_constraints\n    \
             {}, // trace_length\n    \
             {}, // trace_width\n    \
-            {} // tree_depth",
+            {}, // tree_depth",
         E::TWO_ADICITY,
         air_context.ce_domain_size() / proof_options.trace_length,
         E::GENERATOR,

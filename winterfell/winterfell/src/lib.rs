@@ -539,4 +539,4 @@ pub use prover::{
     Serializable, SliceReader, StarkProof,StarkDomain, Trace, TraceInfo, TraceLayout, TraceLde, TraceTable,
     TraceTableFragment, TransitionConstraintDegree,
 };
-pub use verifier::{verify, VerifierError,ConstraintQueries};
+pub use verifier::{verify, VerifierError};

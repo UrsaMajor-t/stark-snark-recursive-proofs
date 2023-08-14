@@ -312,9 +312,9 @@ impl<E: FieldElement, H: ElementHasher<BaseField = E::BaseField>> TraceQueries<E
 /// Container of constraint evaluation query data, including:
 /// * Queried constraint evaluation values.
 /// * Merkle authentication paths for all queries.
-pub struct ConstraintQueries<E: FieldElement, H: ElementHasher<BaseField = E::BaseField>> {
-   pub query_proofs: BatchMerkleProof<H>,
-   pub  evaluations: Table<E>,
+struct ConstraintQueries<E: FieldElement, H: ElementHasher<BaseField = E::BaseField>> {
+    query_proofs: BatchMerkleProof<H>,
+    evaluations: Table<E>,
 }
 
 impl<E: FieldElement, H: ElementHasher<BaseField = E::BaseField>> ConstraintQueries<E, H> {

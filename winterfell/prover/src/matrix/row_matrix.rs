@@ -266,10 +266,9 @@ pub fn build_segments<E: FieldElement, const N: usize>(
     } else {
         polys.num_base_cols() / N + 1
     };
+
     (0..num_segments)
-        .map(|i| {
-           Segment::new(polys, i * N, offsets, twiddles)
-        })
+        .map(|i| Segment::new(polys, i * N, offsets, twiddles))
         .collect()
 }
 

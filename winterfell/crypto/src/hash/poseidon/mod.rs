@@ -1,14 +1,16 @@
-mod param;
 use core::marker::PhantomData;
+
+use math::{FieldElement, StarkField};
+
+use super::{ByteDigest, ElementHasher, Hasher};
+
+mod param;
 
 // Optimized version of poseidon with same output as the basic permutation
 mod poseidon;
 
 #[cfg(test)]
 mod tests;
-
-use super::{ByteDigest, ElementHasher, Hasher};
-use math::{FieldElement, StarkField};
 
 // POSEIDON WITH 256-BIT OUTPUT
 // ===============================================================================================
@@ -17,8 +19,9 @@ use math::{FieldElement, StarkField};
 
 pub struct Poseidon<B: StarkField>(PhantomData<B>);
 
-impl<B:StarkField> Hasher for Poseidon<B> {
+impl<B: StarkField> Hasher for Poseidon<B> {
     type Digest = ByteDigest<32>;
+
     const COLLISION_RESISTANCE: u32 = 256;
 
     fn hash(bytes: &[u8]) -> Self::Digest {
@@ -44,7 +47,7 @@ impl<B:StarkField> Hasher for Poseidon<B> {
 impl<B: StarkField> ElementHasher for Poseidon<B> {
     type BaseField = B;
 
-    fn hash_elements<E: FieldElement<BaseField = Self::BaseField>>(elements: &[E]) -> Self::Digest {
+    fn hash_elements<E: FieldElement<BaseField=Self::BaseField>>(elements: &[E]) -> Self::Digest {
         assert!(B::IS_CANONICAL);
 
         let bytes = E::elements_as_bytes(elements);

@@ -253,7 +253,6 @@ where
             // positions, and query the layer at these positions.
             for i in 0..self.layers.len() {
                 positions = fold_positions(&positions, domain_size, folding_factor);
-                println!("real positions:{:?}",positions);
 
                 // sort of a static dispatch for folding_factor parameter
                 let proof_layer = match folding_factor {

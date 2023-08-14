@@ -3,34 +3,35 @@
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the root directory of this source tree.
 
-use crate::ProofOptions;
-use crypto::{RandomCoin, RandomCoinError};
-use math::{fft, ExtensibleField, ExtensionOf, FieldElement, StarkField, ToElements};
-use utils::collections::{BTreeMap, Vec};
-
-mod trace_info;
-pub use trace_info::{TraceInfo, TraceLayout};
-
-mod context;
-pub use context::AirContext;
-
-mod assertions;
 pub use assertions::Assertion;
-
-mod boundary;
 pub use boundary::{BoundaryConstraint, BoundaryConstraintGroup, BoundaryConstraints};
-
-mod transition;
-pub use transition::{EvaluationFrame, TransitionConstraintDegree, TransitionConstraints};
-
-mod coefficients;
 pub use coefficients::{
     AuxTraceRandElements, ConstraintCompositionCoefficients, DeepCompositionCoefficients,
 };
+pub use context::AirContext;
+use crypto::{RandomCoin, RandomCoinError};
+pub use divisor::ConstraintDivisor;
+use math::{ExtensibleField, ExtensionOf, fft, FieldElement, StarkField, ToElements};
+pub use trace_info::{TraceInfo, TraceLayout};
+pub use transition::{EvaluationFrame, TransitionConstraintDegree, TransitionConstraints};
+use utils::collections::{BTreeMap, Vec};
+use utils::Serializable;
+
+use crate::ProofOptions;
+
+mod trace_info;
+
+mod context;
+
+mod assertions;
+
+mod boundary;
+
+mod transition;
+
+mod coefficients;
 
 mod divisor;
-pub use divisor::ConstraintDivisor;
-use utils::Serializable;
 
 #[cfg(test)]
 mod tests;
@@ -181,7 +182,7 @@ pub trait Air: Send + Sync {
 
     /// A type defining shape of public inputs for the computation described by this protocol.
     /// This could be any type as long as it can be serialized into a sequence of field elements.
-    type PublicInputs: ToElements<Self::BaseField>+Serializable;
+    type PublicInputs: ToElements<Self::BaseField> + Serializable;
 
     // REQUIRED METHODS
     // --------------------------------------------------------------------------------------------
@@ -209,7 +210,7 @@ pub trait Air: Send + Sync {
     /// We define type `E` separately from `Self::BaseField` to allow evaluation of constraints
     /// over the out-of-domain evaluation frame, which may be defined over an extension field
     /// (when extension fields are used).
-    fn evaluate_transition<E: FieldElement<BaseField = Self::BaseField>>(
+    fn evaluate_transition<E: FieldElement<BaseField=Self::BaseField>>(
         &self,
         frame: &EvaluationFrame<E>,
         periodic_values: &[E],
@@ -255,8 +256,8 @@ pub trait Air: Send + Sync {
         aux_rand_elements: &AuxTraceRandElements<E>,
         result: &mut [E],
     ) where
-        F: FieldElement<BaseField = Self::BaseField>,
-        E: FieldElement<BaseField = Self::BaseField> + ExtensionOf<F>,
+        F: FieldElement<BaseField=Self::BaseField>,
+        E: FieldElement<BaseField=Self::BaseField> + ExtensionOf<F>,
     {
         unimplemented!("evaluation of auxiliary transition constraints has not been implemented");
     }
@@ -276,7 +277,7 @@ pub trait Air: Send + Sync {
     /// [get_assertions()](Air::get_assertions) function, which always returns assertions defined
     /// over the base field of the protocol.
     #[allow(unused_variables)]
-    fn get_aux_assertions<E: FieldElement<BaseField = Self::BaseField>>(
+    fn get_aux_assertions<E: FieldElement<BaseField=Self::BaseField>>(
         &self,
         aux_rand_elements: &AuxTraceRandElements<E>,
     ) -> Vec<Assertion<E>> {
@@ -321,9 +322,9 @@ pub trait Air: Send + Sync {
                     "number of values in a periodic column must be a power of two, but was {cycle_length}"
                 );
                 assert!(cycle_length <= self.trace_length(),
-                    "number of values in a periodic column cannot exceed trace length {}, but was {}",
-                    self.trace_length(),
-                    cycle_length
+                        "number of values in a periodic column cannot exceed trace length {}, but was {}",
+                        self.trace_length(),
+                        cycle_length
                 );
 
                 // get twiddles for interpolation and interpolate values into a polynomial
@@ -342,7 +343,7 @@ pub trait Air: Send + Sync {
     /// will be used to compute a random linear combination of transition constraints evaluations
     /// during constraint merging performed by [TransitionConstraintGroup::merge_evaluations()]
     /// function.
-    fn get_transition_constraints<E: FieldElement<BaseField = Self::BaseField>>(
+    fn get_transition_constraints<E: FieldElement<BaseField=Self::BaseField>>(
         &self,
         composition_coefficients: &[E],
     ) -> TransitionConstraints<E> {
@@ -355,7 +356,7 @@ pub trait Air: Send + Sync {
     /// This function also assigns composition coefficients to each constraint, and groups the
     /// constraints by their divisors. The coefficients will be used to compute random linear
     /// combination of boundary constraints during constraint merging.
-    fn get_boundary_constraints<E: FieldElement<BaseField = Self::BaseField>>(
+    fn get_boundary_constraints<E: FieldElement<BaseField=Self::BaseField>>(
         &self,
         aux_rand_elements: &AuxTraceRandElements<E>,
         composition_coefficients: &[E],
@@ -473,9 +474,9 @@ pub trait Air: Send + Sync {
         aux_segment_idx: usize,
         public_coin: &mut R,
     ) -> Result<Vec<E>, RandomCoinError>
-    where
-        E: FieldElement<BaseField = Self::BaseField>,
-        R: RandomCoin<BaseField = Self::BaseField>,
+        where
+            E: FieldElement<BaseField=Self::BaseField>,
+            R: RandomCoin<BaseField=Self::BaseField>,
     {
         let num_elements = self
             .trace_info()
@@ -497,9 +498,9 @@ pub trait Air: Send + Sync {
         &self,
         public_coin: &mut R,
     ) -> Result<ConstraintCompositionCoefficients<E>, RandomCoinError>
-    where
-        E: FieldElement<BaseField = Self::BaseField>,
-        R: RandomCoin<BaseField = Self::BaseField>,
+        where
+            E: FieldElement<BaseField=Self::BaseField>,
+            R: RandomCoin<BaseField=Self::BaseField>,
     {
         let mut t_coefficients = Vec::new();
         for _ in 0..self.context().num_transition_constraints() {
@@ -523,9 +524,9 @@ pub trait Air: Send + Sync {
         &self,
         public_coin: &mut R,
     ) -> Result<DeepCompositionCoefficients<E>, RandomCoinError>
-    where
-        E: FieldElement<BaseField = Self::BaseField>,
-        R: RandomCoin<BaseField = Self::BaseField>,
+        where
+            E: FieldElement<BaseField=Self::BaseField>,
+            R: RandomCoin<BaseField=Self::BaseField>,
     {
         let mut t_coefficients = Vec::new();
         for _ in 0..self.trace_info().width() {

@@ -90,17 +90,17 @@ impl FieldElement for BaseElement {
         BaseElement(self.0)
     }
 
+    fn elements_as_bytes(elements: &[Self]) -> &[u8] {
+        let p = elements.as_ptr();
+        let len = elements.len() * Self::ELEMENT_BYTES;
+        unsafe { slice::from_raw_parts(p as *const u8, len) }
+    }
+
     fn base_element(&self, i: usize) -> Self::BaseField {
         match i {
             0 => *self,
             _ => panic!("element index must be 0, but was {i}"),
         }
-    }
-
-    fn elements_as_bytes(elements: &[Self]) -> &[u8] {
-        let p = elements.as_ptr();
-        let len = elements.len() * Self::ELEMENT_BYTES;
-        unsafe { slice::from_raw_parts(p as *const u8, len) }
     }
 
     unsafe fn bytes_as_elements(bytes: &[u8]) -> Result<&[Self], DeserializationError> {

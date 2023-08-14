@@ -16,8 +16,6 @@ use utils::collections::Vec;
 
 type Blake3 = Blake3_256<BaseElement>;
 
-
-
 #[test]
 fn extend_trace_table() {
     // build the trace and the domain
